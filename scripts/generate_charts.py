@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Generate publication-quality SVG/PNG benchmark charts for visers-nano."""
+"""Generate publication-quality PNG benchmark charts for visers-nano.
+
+All numbers come from reports in the source repo (see BENCHMARKS.md):
+  * abstract-v2 held-out test (5,940 images), 1-thread CPU P50 latency (i7-8700K)
+  * Visers Nano throughput measured with `nano_rgb --bench`
+Throughput of baselines is derived as 1000 / P50 (batch=1, 1 thread).
+"""
 
 from __future__ import annotations
 
@@ -15,12 +21,10 @@ ASSETS.mkdir(parents=True, exist_ok=True)
 FONT_SANS = "Liberation Sans, DejaVu Sans, Arial, sans-serif"
 FONT_MONO = "DejaVu Sans Mono, Liberation Mono, monospace"
 
-# Editorial light palette (clean technical documentation aesthetic)
 BG = "#FFFFFF"
 CARD_BG = "#F8FAFC"
 BORDER = "#E2E8F0"
 GRID = "#E2E8F0"
-AXIS = "#94A3B8"
 TEXT = "#0F172A"
 TEXT_MUTED = "#475569"
 TEXT_LIGHT = "#64748B"
@@ -29,12 +33,32 @@ EMERALD = "#059669"
 EMERALD_BRIGHT = "#10B981"
 EMERALD_SOFT = "#D1FAE5"
 INDIGO = "#4F46E5"
-INDIGO_SOFT = "#E0E7FF"
+SKY = "#0EA5E9"
+VIOLET = "#8B5CF6"
+PINK = "#DB2777"
 AMBER = "#D97706"
 AMBER_SOFT = "#FEF3C7"
 SLATE = "#64748B"
 SLATE_LIGHT = "#94A3B8"
-ROSE = "#E11D48"
+
+# ---------------------------------------------------------------------------
+# Verified data (abstract-v2 test; latency = 1-thread CPU P50, ms)
+# name, short label, ms, style, genre, photo, selection, color
+# ---------------------------------------------------------------------------
+MODELS = [
+    ("Visers Nano", "Visers Nano", 0.457, 0.7686, 0.5291, 0.4126, 0.5307, EMERALD),
+    ("Visers v0.2", "v0.2", 1.279, 0.6451, 0.3724, 0.2082, 0.3585, SLATE_LIGHT),
+    ("Visers v3 (v0.3)", "v0.3", 1.916, 0.6688, 0.4107, 0.2269, 0.3833, SLATE),
+    ("CPUBone Nano 128px", "CPUBone Nano 128", 3.580, 0.7160, 0.4675, 0.3982, 0.4950, INDIGO),
+    ("CPUBone Nano 224px", "CPUBone Nano 224", 5.403, 0.7332, 0.4883, 0.4560, 0.5334, INDIGO),
+    ("CPUBone B0 224px", "CPUBone B0", 11.475, 0.7304, 0.4843, 0.4903, 0.5488, INDIGO),
+    ("TinyCLIP 8M", "TinyCLIP 8M", 37.405, 0.7741, 0.5363, 0.5152, 0.5852, SKY),
+    ("MobileCLIP2-S0", "MobileCLIP2-S0", 65.803, 0.7718, 0.5707, 0.5953, 0.6333, VIOLET),
+    ("MobileCLIP2-S2", "MobileCLIP2-S2", 184.226, 0.8019, 0.5916, 0.6274, 0.6621, PINK),
+]
+TEACHER = {"style": 0.8380, "genre": 0.5907, "photo": 0.6084, "sel": 0.6614}
+NANO_THROUGHPUT_1T = 1838.8  # measured, nano_rgb --bench (dim-256)
+NANO_THROUGHPUT_6T = 10083.2  # measured, NanoSpinPool 6 threads
 
 
 def render_svg_to_png(svg_content: str, out_png: Path, width: int = 2400) -> None:
@@ -52,371 +76,272 @@ def svg_header(w: int, h: int, title: str) -> list[str]:
     return [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">',
         f"  <title>{escape(title)}</title>",
-        "  <defs>",
-        '    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">',
-        '      <feGaussianBlur stdDeviation="4" result="blur"/>',
-        '      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>',
-        "    </filter>",
-        "  </defs>",
         f'  <rect width="{w}" height="{h}" fill="{BG}"/>',
     ]
 
 
+def text(x, y, s, size=13, weight="400", fill=TEXT, anchor="start", mono=False, halo=False) -> str:
+    fam = FONT_MONO if mono else FONT_SANS
+    extra = f'stroke="{CARD_BG}" stroke-width="3.5" stroke-linejoin="round" paint-order="stroke"' if halo else ""
+    return (
+        f'  <text x="{x:.1f}" y="{y:.1f}" text-anchor="{anchor}" font-family="{fam}" '
+        f'font-size="{size}" font-weight="{weight}" fill="{fill}" {extra}>{escape(s)}</text>'
+    )
+
+
+def title_block(lines: list[str], title: str, subtitle: str, x: int = 56) -> None:
+    lines.append(text(x, 44, title, size=25, weight="700"))
+    lines.append(text(x, 72, subtitle, size=14.5, fill=TEXT_MUTED))
+
+
+# ---------------------------------------------------------------------------
+# 1. Pareto: 2x2 small multiples (selection / style / genre / photo)
+# ---------------------------------------------------------------------------
+def pareto_panel(lines, px, py, pw, ph, title, note, idx, key, y_lo, y_hi, y_step):
+    lines.append(f'  <rect x="{px}" y="{py}" width="{pw}" height="{ph}" rx="10" fill="{CARD_BG}" stroke="{BORDER}" stroke-width="1.5"/>')
+    lines.append(text(px + 22, py + 30, title, size=17, weight="700"))
+    lines.append(text(px + 22, py + 52, note, size=12.5, fill=EMERALD, weight="600"))
+
+    l, r, t, b = px + 60, px + pw - 22, py + 76, py + ph - 50
+    x_lo, x_hi = 0.3, 420.0
+
+    def sx(ms):
+        return l + (math.log10(ms) - math.log10(x_lo)) / (math.log10(x_hi) - math.log10(x_lo)) * (r - l)
+
+    def sy(v):
+        return t + (1 - (v - y_lo) / (y_hi - y_lo)) * (b - t)
+
+    n = int(round((y_hi - y_lo) / y_step))
+    for i in range(n + 1):
+        v = y_lo + i * y_step
+        lines.append(f'  <line x1="{l}" y1="{sy(v):.1f}" x2="{r}" y2="{sy(v):.1f}" stroke="{GRID}" stroke-width="1"/>')
+        lines.append(text(l - 8, sy(v) + 4, f"{v:.2f}", size=11.5, fill=TEXT_LIGHT, anchor="end", mono=True))
+    for v in [0.5, 1, 2, 5, 10, 20, 50, 100, 200]:
+        lines.append(f'  <line x1="{sx(v):.1f}" y1="{t}" x2="{sx(v):.1f}" y2="{b}" stroke="{GRID}" stroke-width="1"/>')
+        lines.append(text(sx(v), b + 18, f"{v:g}", size=11.5, fill=TEXT_LIGHT, anchor="middle", mono=True))
+    lines.append(text((l + r) / 2, b + 38, "CPU P50 latency, ms (log, 1 thread)", size=12, weight="600", fill=TEXT_MUTED, anchor="middle"))
+
+    # teacher ceiling
+    ty = sy(TEACHER[key])
+    lines.append(f'  <line x1="{l}" y1="{ty:.1f}" x2="{r}" y2="{ty:.1f}" stroke="{AMBER}" stroke-width="1.8" stroke-dasharray="7 5"/>')
+    lines.append(text(l + 8, ty - 6, f"SigLIP2 Base teacher {TEACHER[key]:.3f}", size=11, weight="700", fill="#92400E", anchor="start", halo=True))
+
+    pts = sorted(MODELS, key=lambda m: m[2])
+    # pareto frontier: strictly better score than every faster model
+    frontier, best = [], -1.0
+    for m in pts:
+        if m[idx] > best:
+            frontier.append(m)
+            best = m[idx]
+    poly = " ".join(f"{sx(m[2]):.1f},{sy(m[idx]):.1f}" for m in frontier)
+    lines.append(f'  <polyline points="{poly}" fill="none" stroke="{EMERALD}" stroke-width="2.2" stroke-dasharray="6 4" opacity="0.8"/>')
+
+    for i, m in enumerate(pts):
+        name, short, ms, *_rest = m
+        v = m[idx]
+        col = m[7]
+        x, y = sx(ms), sy(v)
+        hero = name == "Visers Nano"
+        on_f = m in frontier
+        if hero:
+            lines.append(f'  <circle cx="{x:.1f}" cy="{y:.1f}" r="17" fill="{EMERALD_SOFT}" opacity="0.9"/>')
+        lines.append(f'  <circle cx="{x:.1f}" cy="{y:.1f}" r="{9 if hero else 6.5}" fill="{col}" stroke="#FFFFFF" stroke-width="2"/>')
+        # (dx, dy, anchor) per model to avoid collisions
+        place = {
+            "Visers Nano": (-8, 36, "start"),
+            "Visers v0.2": (-10, 4, "end"),
+            "Visers v3 (v0.3)": (0, -12, "middle"),
+            "CPUBone Nano 128px": (0, 22, "middle"),
+            "CPUBone Nano 224px": (-9, -11, "end"),
+            "CPUBone B0 224px": (0, 22, "middle"),
+            "TinyCLIP 8M": (0, 22, "middle"),
+            "MobileCLIP2-S0": (-10, -10, "end"),
+            "MobileCLIP2-S2": (0, -13, "middle"),
+        }[name]
+        if key in ("style", "genre") and hero:
+            place = (-8, -16, "start")
+        if key == "style" and name == "TinyCLIP 8M":
+            place = (0, -13, "middle")
+        if key == "style" and name == "MobileCLIP2-S0":
+            place = (0, 22, "middle")
+        label = f"{short} {v:.3f}" if hero else short
+        lines.append(text(x + place[0], y + place[1], label, size=12.5 if hero else 11, weight="700" if (hero or on_f) else "500", fill=EMERALD if hero else (TEXT if on_f else TEXT_MUTED), anchor=place[2], halo=True))
+
+
 def build_pareto_chart() -> str:
-    w, h = 1280, 740
-    pad_l, pad_r, pad_t, pad_b = 96, 56, 118, 96
-    pw = w - pad_l - pad_r
-    ph = h - pad_t - pad_b
-
-    x_min, x_max = 0.30, 300.0
-    y_min, y_max = 0.30, 0.70
-
-    def sx(ms: float) -> float:
-        return pad_l + (math.log10(ms) - math.log10(x_min)) / (math.log10(x_max) - math.log10(x_min)) * pw
-
-    def sy(score: float) -> float:
-        return pad_t + (1.0 - (score - y_min) / (y_max - y_min)) * ph
-
-    lines = svg_header(w, h, "Visers Nano Speed vs Quality Pareto Frontier")
-
-    # Header
-    lines.append(
-        f'  <text x="{pad_l}" y="46" font-family="{FONT_SANS}" font-size="26" font-weight="700" fill="{TEXT}">'
-        "Speed vs. Quality Pareto Frontier (abstract-v2, 5,940 images)</text>"
+    w, h = 1360, 1070
+    lines = svg_header(w, h, "Visers Nano speed vs quality (abstract-v2)")
+    title_block(
+        lines,
+        "Speed vs. Quality: Visers Nano owns the sub-millisecond corner",
+        "abstract-v2 held-out test (5,940 images) · 1-thread CPU P50 latency, Intel i7-8700K · per-task nDCG@10 and combined Selection score",
     )
-    lines.append(
-        f'  <text x="{pad_l}" y="76" font-family="{FONT_SANS}" font-size="15" fill="{TEXT_MUTED}">'
-        "1-thread CPU P50 latency (log scale, Intel Core i7-8700K) vs. combined Selection nDCG@10 (0.25·Style + 0.25·Genre + 0.50·Photo)</text>"
-    )
-
-    # Plot background
-    lines.append(
-        f'  <rect x="{pad_l}" y="{pad_t}" width="{pw}" height="{ph}" rx="8" fill="{CARD_BG}" stroke="{BORDER}" stroke-width="1.5"/>'
-    )
-
-    # Subtle "Better: faster & higher quality" directional hint in top-left
-    lines.append(
-        f'  <rect x="{pad_l + 18}" y="{pad_t + 16}" width="250" height="32" rx="6" fill="{EMERALD_SOFT}" stroke="{EMERALD_BRIGHT}" stroke-width="1"/>'
-    )
-    lines.append(
-        f'  <text x="{pad_l + 30}" y="{pad_t + 37}" font-family="{FONT_SANS}" font-size="13" font-weight="700" fill="{EMERALD}">'
-        "↖ Top-left is better (faster + sharper)</text>"
-    )
-
-    # Y gridlines & labels
-    for y_val in [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70]:
-        yy = sy(y_val)
-        lines.append(
-            f'  <line x1="{pad_l}" y1="{yy:.1f}" x2="{pad_l + pw}" y2="{yy:.1f}" stroke="{GRID}" stroke-width="1"/>'
-        )
-        lines.append(
-            f'  <text x="{pad_l - 14}" y="{yy + 5:.1f}" text-anchor="end" font-family="{FONT_MONO}" font-size="13" fill="{TEXT_LIGHT}">{y_val:.2f}</text>'
-        )
-
-    # X gridlines & labels (log)
-    for x_val, lbl in [(0.5, "0.5 ms"), (1, "1 ms"), (2, "2 ms"), (5, "5 ms"), (10, "10 ms"), (20, "20 ms"), (50, "50 ms"), (100, "100 ms"), (200, "200 ms")]:
-        xx = sx(x_val)
-        lines.append(
-            f'  <line x1="{xx:.1f}" y1="{pad_t}" x2="{xx:.1f}" y2="{pad_t + ph}" stroke="{GRID}" stroke-width="1"/>'
-        )
-        lines.append(
-            f'  <text x="{xx:.1f}" y="{pad_t + ph + 26}" text-anchor="middle" font-family="{FONT_MONO}" font-size="13" fill="{TEXT_LIGHT}">{lbl}</text>'
-        )
-
-    # Axis titles
-    lines.append(
-        f'  <text x="{pad_l + pw / 2:.1f}" y="{h - 24}" text-anchor="middle" font-family="{FONT_SANS}" font-size="15" font-weight="600" fill="{TEXT_MUTED}">'
-        "1-Thread CPU P50 Latency (ms, log scale)</text>"
-    )
-    lines.append(
-        f'  <text x="28" y="{pad_t + ph / 2:.1f}" text-anchor="middle" transform="rotate(-90 28 {pad_t + ph / 2:.1f})" font-family="{FONT_SANS}" font-size="15" font-weight="600" fill="{TEXT_MUTED}">'
-        "Combined Selection nDCG@10</text>"
-    )
-
-    # SigLIP2 Teacher ceiling line
-    siglip_y = sy(0.6614)
-    lines.append(
-        f'  <line x1="{pad_l}" y1="{siglip_y:.1f}" x2="{pad_l + pw}" y2="{siglip_y:.1f}" stroke="{AMBER}" stroke-width="2" stroke-dasharray="8 6"/>'
-    )
-    lines.append(
-        f'  <rect x="{pad_l + 300}" y="{siglip_y - 28:.1f}" width="322" height="24" rx="4" fill="{AMBER_SOFT}" stroke="{AMBER}" stroke-width="1"/>'
-    )
-    lines.append(
-        f'  <text x="{pad_l + 310}" y="{siglip_y - 12:.1f}" font-family="{FONT_SANS}" font-size="12.5" font-weight="700" fill="#92400E">'
-        "SigLIP2 Base Teacher Ceiling (224px): 0.6614</text>"
-    )
-
-    # Pareto frontier points (ordered by latency)
-    pareto_pts = [
-        ("Visers Nano (Rust AVX2)", 0.457, 0.5307),
-        ("CPUBone Nano (224px)", 5.403, 0.5334),
-        ("CPUBone B0 (224px)", 11.475, 0.5488),
-        ("TinyCLIP 8M (224px)", 37.405, 0.5852),
-        ("MobileCLIP2-S0 (256px)", 65.803, 0.6333),
-        ("MobileCLIP2-S2 (256px)", 184.226, 0.6621),
+    pw, ph = 620, 420
+    gx, gy = 56, 100
+    sel_ratio = 0.5307 / TEACHER["sel"] * 100
+    spec = [
+        ("Combined Selection score", f"{sel_ratio:.0f}% of the SigLIP2 teacher score at 0.457 ms", 6, "sel", 0.30, 0.70, 0.10),
+        ("Art Style nDCG@10", "0.769 ≈ TinyCLIP 8M (0.774) at 82× lower latency", 2, "style", 0.60, 0.85, 0.05),
+        ("Art Genre nDCG@10", "above CPUBone Nano / B0 (0.468–0.488), 8–25× faster", 3, "genre", 0.35, 0.65, 0.05),
+        ("Photo (COCO) nDCG@10", "weakest task: 0.413 vs CPUBone Nano 128px 0.398 at 7.8× lower latency", 4, "photo", 0.15, 0.70, 0.10),
     ]
-    poly_coords = " ".join(f"{sx(ms):.1f},{sy(sc):.1f}" for _, ms, sc in pareto_pts)
-    lines.append(
-        f'  <polyline points="{poly_coords}" fill="none" stroke="{EMERALD}" stroke-width="2.5" stroke-dasharray="6 4" opacity="0.85"/>'
-    )
+    # idx in MODELS tuple: style=3, genre=4, photo=5, sel=6
+    idx_map = {"sel": 6, "style": 3, "genre": 4, "photo": 5}
+    for i, (ttl, note, _, key, lo, hi, step) in enumerate(spec):
+        col, row = i % 2, i // 2
+        pareto_panel(lines, gx + col * (pw + 24), gy + row * (ph + 24), pw, ph, ttl, note, idx_map[key], key, lo, hi, step)
 
-    # Horizontal callout connecting Visers Nano to CPUBone Nano 224px (11.8x faster)
-    nano_x, nano_y = sx(0.457), sy(0.5307)
-    cpub224_x, cpub224_y = sx(5.403), sy(0.5334)
-    mid_x = (nano_x + cpub224_x) / 2
-    lines.append(
-        f'  <line x1="{nano_x + 12:.1f}" y1="{nano_y + 22:.1f}" x2="{cpub224_x - 10:.1f}" y2="{nano_y + 22:.1f}" stroke="{EMERALD}" stroke-width="1.5" stroke-dasharray="3 3"/>'
-    )
-    lines.append(
-        f'  <rect x="{mid_x - 115:.1f}" y="{nano_y + 10:.1f}" width="230" height="24" rx="12" fill="{EMERALD_SOFT}" stroke="{EMERALD}" stroke-width="1"/>'
-    )
-    lines.append(
-        f'  <text x="{mid_x:.1f}" y="{nano_y + 26:.1f}" text-anchor="middle" font-family="{FONT_SANS}" font-size="12" font-weight="700" fill="{EMERALD}">'
-        "11.8× faster at matching quality</text>"
-    )
-
-    # All points: (label, sublabel, ms, score, color, radius, dx, dy, anchor, is_pareto, is_hero)
-    points = [
-        ("Visers Nano (Rust AVX2)", "0.457 ms · 0.531 · 0.48 MiB", 0.457, 0.5307, EMERALD, 10, -4, -36, "start", True, True),
-        ("Visers Nano (ORT FP32)", "0.748 ms · 0.531", 0.748, 0.5307, EMERALD_BRIGHT, 6.5, 22, -68, "start", False, False),
-        ("Visers v0.2 (Rust)", "1.279 ms · 0.359", 1.279, 0.3585, SLATE, 6.5, -12, -12, "end", False, False),
-        ("Visers v3 / v0.3 (Rust)", "1.916 ms · 0.383", 1.916, 0.3833, SLATE, 6.5, 12, 16, "start", False, False),
-        ("CPUBone Nano (128px)", "3.580 ms · 0.495", 3.580, 0.4950, INDIGO, 6.5, 12, 16, "start", False, False),
-        ("CPUBone Nano (224px)", "5.403 ms · 0.533", 5.403, 0.5334, INDIGO, 7.5, 0, -28, "middle", True, False),
-        ("CPUBone B0 (224px)", "11.475 ms · 0.549", 11.475, 0.5488, INDIGO, 7.5, 12, 20, "start", True, False),
-        ("TinyCLIP 8M (224px)", "37.41 ms · 0.585", 37.405, 0.5852, INDIGO, 7.5, 12, 16, "start", True, False),
-        ("MobileCLIP2-S0 (256px)", "65.80 ms · 0.633", 65.803, 0.6333, INDIGO, 7.5, -14, -10, "end", True, False),
-        ("MobileCLIP2-S2 (256px)", "184.2 ms · 0.662", 184.226, 0.6621, INDIGO, 7.5, -12, -26, "end", True, False),
+    # legend
+    ly = gy + 2 * ph + 24 + 38
+    items = [
+        (EMERALD, "Visers Nano (Rust AVX2, 128px)"),
+        (INDIGO, "CPUBone Nano / B0 (ORT FP32)"),
+        (SKY, "TinyCLIP 8M"),
+        (VIOLET, "MobileCLIP2-S0"),
+        (PINK, "MobileCLIP2-S2"),
+        (SLATE, "Visers v0.2 / v0.3"),
     ]
-
-    # Small leader line for ORT FP32
-    lines.append(
-        f'  <line x1="{sx(0.748):.1f}" y1="{sy(0.5307):.1f}" x2="{sx(0.748) + 20:.1f}" y2="{sy(0.5307) - 58:.1f}" stroke="{EMERALD_BRIGHT}" stroke-width="1.2" opacity="0.75"/>'
-    )
-
-    for label, sub, ms, sc, color, r, dx, dy, anchor, is_pareto, is_hero in points:
-        px, py = sx(ms), sy(sc)
-        if is_hero:
-            lines.append(
-                f'  <circle cx="{px:.1f}" cy="{py:.1f}" r="18" fill="{EMERALD_SOFT}" opacity="0.8"/>'
-            )
-            lines.append(
-                f'  <circle cx="{px:.1f}" cy="{py:.1f}" r="{r}" fill="{color}" stroke="#FFFFFF" stroke-width="2.5" filter="url(#glow)"/>'
-            )
-        else:
-            stroke_w = "2" if is_pareto else "1.5"
-            lines.append(
-                f'  <circle cx="{px:.1f}" cy="{py:.1f}" r="{r}" fill="{color}" stroke="#FFFFFF" stroke-width="{stroke_w}"/>'
-            )
-
-        tx = px + dx
-        ty = py + dy
-        weight = "700" if is_hero else ("600" if is_pareto else "500")
-        lbl_color = TEXT if (is_hero or is_pareto) else TEXT_MUTED
-        lines.append(
-            f'  <text x="{tx:.1f}" y="{ty:.1f}" text-anchor="{anchor}" font-family="{FONT_SANS}" font-size="{"14" if is_hero else "12.5"}" font-weight="{weight}" fill="{lbl_color}">{escape(label)}</text>'
-        )
-        lines.append(
-            f'  <text x="{tx:.1f}" y="{ty + 15:.1f}" text-anchor="{anchor}" font-family="{FONT_MONO}" font-size="11.5" fill="{EMERALD if is_hero else TEXT_LIGHT}">{escape(sub)}</text>'
-        )
-
-    # Legend box (bottom-right)
-    lx, ly = pad_l + pw - 270, pad_t + ph - 120
-    lines.append(
-        f'  <rect x="{lx}" y="{ly}" width="254" height="104" rx="8" fill="#FFFFFF" stroke="{BORDER}" stroke-width="1.2"/>'
-    )
-    legend_items = [
-        (EMERALD, "Visers Nano (Pareto Frontier)", True),
-        (INDIGO, "External Baselines (ORT FP32)", False),
-        (SLATE, "Legacy Visers (v0.2 / v0.3)", False),
-    ]
-    for idx, (col, txt, dash) in enumerate(legend_items):
-        iy = ly + 26 + idx * 28
-        lines.append(f'  <circle cx="{lx + 22}" cy="{iy - 4}" r="6" fill="{col}"/>')
-        if dash:
-            lines.append(
-                f'  <line x1="{lx + 8}" y1="{iy - 4}" x2="{lx + 36}" y2="{iy - 4}" stroke="{col}" stroke-width="2" stroke-dasharray="4 3"/>'
-            )
-        lines.append(
-            f'  <text x="{lx + 44}" y="{iy}" font-family="{FONT_SANS}" font-size="12.5" font-weight="600" fill="{TEXT_MUTED}">{escape(txt)}</text>'
-        )
-
+    lx = 56
+    for col, lbl in items:
+        lines.append(f'  <circle cx="{lx + 6}" cy="{ly - 4}" r="6" fill="{col}"/>')
+        lines.append(text(lx + 18, ly, lbl, size=12.5, weight="600", fill=TEXT_MUTED))
+        lx += 18 + len(lbl) * 6.9 + 22
+    lines.append(text(56, ly + 26, "Dashed green line = Pareto frontier of that task (a model is on it only if it beats every faster model). Dashed amber = teacher ceiling.", size=12, fill=TEXT_LIGHT))
     lines.append("</svg>")
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# 2. Domain comparison + throughput of the same models
+# ---------------------------------------------------------------------------
 def build_domain_comparison_chart() -> str:
-    w, h = 1280, 620
-    lines = svg_header(w, h, "Per-Domain Quality & Strict Artist-Disjoint Generalization")
-
-    lines.append(
-        f'  <text x="56" y="44" font-family="{FONT_SANS}" font-size="25" font-weight="700" fill="{TEXT}">'
-        "Retrieval Quality Across Domains &amp; Strict Artist-Disjoint Split</text>"
+    w, h = 1360, 640
+    lines = svg_header(w, h, "Quality per domain and throughput vs larger models")
+    title_block(
+        lines,
+        "Quality per Task vs. Larger Models — and What It Costs in Throughput",
+        "Left: nDCG@10 on abstract-v2 held-out test (5,940 images). Right: 1-thread throughput of the same models (i7-8700K).",
     )
-    lines.append(
-        f'  <text x="56" y="72" font-family="{FONT_SANS}" font-size="14.5" fill="{TEXT_MUTED}">'
-        "nDCG@10 on abstract-v2 held-out test (5,940 images) and strict artist-disjoint visers-v6 test (12,075 images)</text>"
-    )
+    shown = [m for m in MODELS if m[0] in ("Visers Nano", "CPUBone B0 224px", "TinyCLIP 8M", "MobileCLIP2-S0", "MobileCLIP2-S2")]
+    shown_labels = {
+        "Visers Nano": "Visers Nano",
+        "CPUBone B0 224px": "CPUBone B0",
+        "TinyCLIP 8M": "TinyCLIP 8M",
+        "MobileCLIP2-S0": "MobileCLIP2-S0",
+        "MobileCLIP2-S2": "MobileCLIP2-S2",
+    }
 
-    # Left panel: abstract-v2 per-domain grouped bars
-    p1x, p1y, p1w, p1h = 56, 108, 690, 456
+    # ---- left panel
+    p1x, p1y, p1w, p1h = 56, 100, 800, 500
     lines.append(f'  <rect x="{p1x}" y="{p1y}" width="{p1w}" height="{p1h}" rx="10" fill="{CARD_BG}" stroke="{BORDER}" stroke-width="1.5"/>')
-    lines.append(f'  <text x="{p1x + 24}" y="{p1y + 34}" font-family="{FONT_SANS}" font-size="17" font-weight="700" fill="{TEXT}">abstract-v2 Held-Out Test (nDCG@10)</text>')
+    lines.append(text(p1x + 24, p1y + 34, "Retrieval quality (nDCG@10, higher is better)", size=17, weight="700"))
+    lx = p1x + 24
+    for m in shown:
+        lbl = shown_labels[m[0]]
+        lines.append(f'  <rect x="{lx}" y="{p1y + 50}" width="11" height="11" rx="2" fill="{m[7]}"/>')
+        lines.append(text(lx + 16, p1y + 60, lbl, size=11.5, weight="600", fill=TEXT_MUTED))
+        lx += 16 + len(lbl) * 6.4 + 20
 
-    chart_l, chart_r, chart_t, chart_b = p1x + 64, p1x + p1w - 28, p1y + 92, p1y + p1h - 54
-    cw = chart_r - chart_l
-    ch = chart_b - chart_t
+    cl, cr, ct, cb = p1x + 56, p1x + p1w - 24, p1y + 100, p1y + p1h - 62
+    ch = cb - ct
 
-    def sy1(val: float) -> float:
-        return chart_t + (1.0 - val / 0.90) * ch
+    def sy(v):
+        return ct + (1 - v / 0.90) * ch
 
     for v in [0.0, 0.2, 0.4, 0.6, 0.8]:
-        yy = sy1(v)
-        lines.append(f'  <line x1="{chart_l}" y1="{yy:.1f}" x2="{chart_r}" y2="{yy:.1f}" stroke="{GRID}" stroke-width="1"/>')
-        lines.append(f'  <text x="{chart_l - 10}" y="{yy + 4:.1f}" text-anchor="end" font-family="{FONT_MONO}" font-size="12" fill="{TEXT_LIGHT}">{v:.1f}</text>')
+        lines.append(f'  <line x1="{cl}" y1="{sy(v):.1f}" x2="{cr}" y2="{sy(v):.1f}" stroke="{GRID}" stroke-width="1"/>')
+        lines.append(text(cl - 10, sy(v) + 4, f"{v:.1f}", size=12, fill=TEXT_LIGHT, anchor="end", mono=True))
 
-    models = [
-        ("Visers Nano (0.457 ms)", EMERALD, [0.7686, 0.5291, 0.4126]),
-        ("CPUBone Nano 128px (3.58 ms)", INDIGO, [0.7160, 0.4675, 0.3982]),
-        ("Visers v3 / v0.3 (1.92 ms)", SLATE, [0.6688, 0.4107, 0.2269]),
-        ("Visers v0.2 (1.28 ms)", SLATE_LIGHT, [0.6451, 0.3724, 0.2082]),
-    ]
-    domains = ["Art Style", "Art Genre", "Photo (COCO)"]
-    teacher_vals = [0.8380, 0.5907, 0.6084]
+    domains = [("Art Style", 3, "style"), ("Art Genre", 4, "genre"), ("Photo (COCO)", 5, "photo")]
+    gw = (cr - cl) / 3
+    bw, gap = 28, 6
+    total = len(shown) * bw + (len(shown) - 1) * gap
+    for di, (dname, idx, key) in enumerate(domains):
+        gx = cl + di * gw + (gw - total) / 2
+        ty = sy(TEACHER[key])
+        lines.append(f'  <line x1="{gx - 8:.1f}" y1="{ty:.1f}" x2="{gx + total + 8:.1f}" y2="{ty:.1f}" stroke="{AMBER}" stroke-width="2" stroke-dasharray="5 3"/>')
+        for mi, m in enumerate(shown):
+            v = m[idx]
+            bx = gx + mi * (bw + gap)
+            by = sy(v)
+            lines.append(f'  <rect x="{bx:.1f}" y="{by:.1f}" width="{bw}" height="{cb - by:.1f}" rx="4" fill="{m[7]}"/>')
+            lines.append(text(bx + bw / 2, by - 6, f"{v:.3f}", size=10.5, weight="700" if mi == 0 else "500", fill=TEXT if mi == 0 else TEXT_MUTED, anchor="middle", mono=True, halo=True))
+        lines.append(text(gx + total / 2, cb + 26, dname, size=14, weight="700", anchor="middle"))
+        lines.append(text(gx + total / 2, cb + 44, f"SigLIP2 teacher (dashed): {TEACHER[key]:.3f}", size=11, weight="700", fill="#92400E", anchor="middle", mono=True))
 
-    # Legend row at top of panel 1
-    legend_xs = [p1x + 24, p1x + 175, p1x + 382, p1x + 545]
-    ly = p1y + 62
-    for lx, (name, col, _) in zip(legend_xs, models):
-        lines.append(f'  <rect x="{lx}" y="{ly - 10}" width="10" height="10" rx="2" fill="{col}"/>')
-        lines.append(f'  <text x="{lx + 14}" y="{ly}" font-family="{FONT_SANS}" font-size="11" font-weight="600" fill="{TEXT_MUTED}">{escape(name)}</text>')
-
-    group_w = cw / len(domains)
-    bar_w = 32
-    gap = 6
-    total_bars_w = len(models) * bar_w + (len(models) - 1) * gap
-
-    for d_idx, d_name in enumerate(domains):
-        gx = chart_l + d_idx * group_w + (group_w - total_bars_w) / 2
-        # Teacher dashed cap across group
-        ty = sy1(teacher_vals[d_idx])
-        lines.append(
-            f'  <line x1="{gx - 6:.1f}" y1="{ty:.1f}" x2="{gx + total_bars_w + 6:.1f}" y2="{ty:.1f}" stroke="{AMBER}" stroke-width="2" stroke-dasharray="5 3"/>'
-        )
-        lines.append(
-            f'  <text x="{gx + total_bars_w / 2:.1f}" y="{ty - 6:.1f}" text-anchor="middle" font-family="{FONT_MONO}" font-size="11" font-weight="700" fill="#92400E">SigLIP2 {teacher_vals[d_idx]:.3f}</text>'
-        )
-
-        for m_idx, (_, col, vals) in enumerate(models):
-            val = vals[d_idx]
-            bx = gx + m_idx * (bar_w + gap)
-            by = sy1(val)
-            bh = chart_b - by
-            lines.append(f'  <rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w}" height="{bh:.1f}" rx="4" fill="{col}"/>')
-            lines.append(
-                f'  <text x="{bx + bar_w / 2:.1f}" y="{by - 6:.1f}" text-anchor="middle" font-family="{FONT_MONO}" font-size="10.5" font-weight="{"700" if m_idx == 0 else "500"}" fill="{TEXT if m_idx == 0 else TEXT_MUTED}">{val:.3f}</text>'
-            )
-
-        lines.append(
-            f'  <text x="{gx + total_bars_w / 2:.1f}" y="{chart_b + 24}" text-anchor="middle" font-family="{FONT_SANS}" font-size="14" font-weight="700" fill="{TEXT}">{escape(d_name)}</text>'
-        )
-
-    # Right panel: visers-v6 strict artist-disjoint + MRL dims
-    p2x, p2y, p2w, p2h = 770, 108, 454, 456
+    # ---- right panel: throughput (log bars)
+    p2x, p2y, p2w, p2h = 880, 100, 424, 500
     lines.append(f'  <rect x="{p2x}" y="{p2y}" width="{p2w}" height="{p2h}" rx="10" fill="{CARD_BG}" stroke="{BORDER}" stroke-width="1.5"/>')
-    lines.append(f'  <text x="{p2x + 24}" y="{p2y + 34}" font-family="{FONT_SANS}" font-size="17" font-weight="700" fill="{TEXT}">Strict Artist-Disjoint (visers-v6)</text>')
-    lines.append(f'  <text x="{p2x + 24}" y="{p2y + 56}" font-family="{FONT_SANS}" font-size="12.5" fill="{TEXT_MUTED}">12,075 unseen test images · Visers Nano vs. Visers v6</text>')
+    lines.append(text(p2x + 24, p2y + 34, "1-thread throughput (img/s, log scale)", size=17, weight="700"))
+    lines.append(text(p2x + 24, p2y + 56, "higher is better · same models and colors", size=12.5, fill=TEXT_MUTED))
 
-    c2_l, c2_r, c2_t, c2_b = p2x + 58, p2x + p2w - 24, p2y + 104, p2y + 318
-    c2w = c2_r - c2_l
-    c2h = c2_b - c2_t
+    def thr(m):
+        return NANO_THROUGHPUT_1T if m[0] == "Visers Nano" else 1000.0 / m[2]
 
-    def sy2(val: float) -> float:
-        return c2_t + (1.0 - val / 0.70) * c2h
-
-    for v in [0.0, 0.2, 0.4, 0.6]:
-        yy = sy2(v)
-        lines.append(f'  <line x1="{c2_l}" y1="{yy:.1f}" x2="{c2_r}" y2="{yy:.1f}" stroke="{GRID}" stroke-width="1"/>')
-        lines.append(f'  <text x="{c2_l - 8}" y="{yy + 4:.1f}" text-anchor="end" font-family="{FONT_MONO}" font-size="11.5" fill="{TEXT_LIGHT}">{v:.1f}</text>')
-
-    v6_metrics = [
-        ("Style", 0.3587, 0.2575),
-        ("Genre", 0.6096, 0.4323),
-        ("Photo", 0.4181, 0.2444),
-        ("Select", 0.4511, 0.2946),
-    ]
-    g2w = c2w / len(v6_metrics)
-    bw2 = 28
-    for idx, (lbl, nano_v, v6_v) in enumerate(v6_metrics):
-        gx = c2_l + idx * g2w + (g2w - (bw2 * 2 + 6)) / 2
-        for j, (val, col) in enumerate([(nano_v, EMERALD), (v6_v, SLATE)]):
-            bx = gx + j * (bw2 + 6)
-            by = sy2(val)
-            lines.append(f'  <rect x="{bx:.1f}" y="{by:.1f}" width="{bw2}" height="{c2_b - by:.1f}" rx="4" fill="{col}"/>')
-            lines.append(f'  <text x="{bx + bw2 / 2:.1f}" y="{by - 6:.1f}" text-anchor="middle" font-family="{FONT_MONO}" font-size="10.5" font-weight="{"700" if j == 0 else "500"}" fill="{TEXT if j == 0 else TEXT_MUTED}">{val:.3f}</text>')
-        lines.append(f'  <text x="{gx + bw2 + 3:.1f}" y="{c2_b + 20}" text-anchor="middle" font-family="{FONT_SANS}" font-size="12.5" font-weight="600" fill="{TEXT}">{lbl}</text>')
-
-    # Legend inside panel 2
-    lines.append(f'  <rect x="{p2x + 24}" y="{p2y + 72}" width="10" height="10" rx="2" fill="{EMERALD}"/>')
-    lines.append(f'  <text x="{p2x + 39}" y="{p2y + 81}" font-family="{FONT_SANS}" font-size="11.5" font-weight="600" fill="{TEXT_MUTED}">Visers Nano (0.457 ms)</text>')
-    lines.append(f'  <rect x="{p2x + 195}" y="{p2y + 72}" width="10" height="10" rx="2" fill="{SLATE}"/>')
-    lines.append(f'  <text x="{p2x + 210}" y="{p2y + 81}" font-family="{FONT_SANS}" font-size="11.5" font-weight="600" fill="{TEXT_MUTED}">Visers v6 (0.854 ms)</text>')
-
-    # MRL summary box at bottom of panel 2
-    mx, my, mw, mh = p2x + 24, p2y + 356, p2w - 48, 80
-    lines.append(f'  <rect x="{mx}" y="{my}" width="{mw}" height="{mh}" rx="8" fill="#FFFFFF" stroke="{BORDER}" stroke-width="1.2"/>')
-    lines.append(f'  <text x="{mx + 16}" y="{my + 24}" font-family="{FONT_SANS}" font-size="13" font-weight="700" fill="{TEXT}">Matryoshka (MRL) Dimension Scaling (visers-v6)</text>')
-    lines.append(
-        f'  <text x="{mx + 16}" y="{my + 48}" font-family="{FONT_MONO}" font-size="12" fill="{EMERALD}" font-weight="700">256D: 0.4511 (489 KiB)</text>'
-        f'  <text x="{mx + 205}" y="{my + 48}" font-family="{FONT_MONO}" font-size="12" fill="{TEXT_MUTED}">128D: 0.4501 (428 KiB)</text>'
-    )
-    lines.append(
-        f'  <text x="{mx + 16}" y="{my + 68}" font-family="{FONT_MONO}" font-size="12" fill="{TEXT_MUTED}"> 64D: 0.4435 (397 KiB, 0.441 ms P50)</text>'
-    )
-
+    bl, br = p2x + 24, p2x + p2w - 24
+    log_lo, log_hi = 0.0, math.log10(5000.0)
+    for i, m in enumerate(shown):
+        yy = p2y + 100 + i * 66
+        v = thr(m)
+        bar = (math.log10(v) - log_lo) / (log_hi - log_lo) * (br - bl)
+        lines.append(text(bl, yy, shown_labels[m[0]], size=13, weight="700"))
+        lines.append(f'  <rect x="{bl}" y="{yy + 8}" width="{br - bl}" height="22" rx="5" fill="#E2E8F0" opacity="0.55"/>')
+        lines.append(f'  <rect x="{bl}" y="{yy + 8}" width="{bar:.1f}" height="22" rx="5" fill="{m[7]}"/>')
+        label = f"{v:,.0f} img/s" if v >= 100 else f"{v:,.1f} img/s"
+        if i == 0:
+            lines.append(text(bl + bar - 8, yy + 24, label, size=12, weight="700", fill="#FFFFFF", anchor="end", mono=True))
+        else:
+            lines.append(text(bl + bar + 8, yy + 24, f"{label} · {NANO_THROUGHPUT_1T / v:,.0f}× slower", size=11.5, weight="700", fill=TEXT_MUTED, mono=True))
+    lines.append(text(p2x + 24, p2y + p2h - 40, "Baselines: 1000 / P50 (ORT FP32, batch=1). Visers Nano: measured", size=11, fill=TEXT_LIGHT))
+    lines.append(text(p2x + 24, p2y + p2h - 24, "1,839 img/s (conservative; 1000 / 0.457 ms would be 2,188).", size=11, fill=TEXT_LIGHT))
     lines.append("</svg>")
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# 3. Runtime throughput vs CPUBone Nano + per-stage profile
+# ---------------------------------------------------------------------------
 def build_runtime_profile_chart() -> str:
-    w, h = 1280, 500
-    lines = svg_header(w, h, "Visers Nano Throughput Scaling & Per-Stage Execution Profile")
-
-    lines.append(
-        f'  <text x="56" y="44" font-family="{FONT_SANS}" font-size="25" font-weight="700" fill="{TEXT}">'
-        "Zero-Alloc Rust Engine: Throughput &amp; Stage Profile</text>"
-    )
-    lines.append(
-        f'  <text x="56" y="72" font-family="{FONT_SANS}" font-size="14.5" fill="{TEXT_MUTED}">'
-        "Measured on Intel Core i7-8700K (AVX2 + FMA, 128×128 RGB input, 0 heap allocations per call)</text>"
+    w, h = 1360, 560
+    lines = svg_header(w, h, "Visers Nano throughput and per-stage profile")
+    title_block(
+        lines,
+        "Zero-Alloc Rust Engine: Throughput vs. CPUBone Nano & Stage Profile",
+        "Intel Core i7-8700K (AVX2 + FMA), 128×128 RGB input · Visers Nano: 0 heap allocations per call",
     )
 
-    # Left panel: Throughput (img/s)
-    p1x, p1y, p1w, p1h = 56, 106, 560, 350
+    p1x, p1y, p1w, p1h = 56, 106, 640, 420
     lines.append(f'  <rect x="{p1x}" y="{p1y}" width="{p1w}" height="{p1h}" rx="10" fill="{CARD_BG}" stroke="{BORDER}" stroke-width="1.5"/>')
-    lines.append(f'  <text x="{p1x + 24}" y="{p1y + 34}" font-family="{FONT_SANS}" font-size="17" font-weight="700" fill="{TEXT}">Inference Throughput (images / sec)</text>')
-    lines.append(f'  <text x="{p1x + 24}" y="{p1y + 56}" font-family="{FONT_SANS}" font-size="12.5" fill="{TEXT_MUTED}">Single-thread vs. 6-thread NanoSpinPool (batch=64)</text>')
+    lines.append(text(p1x + 24, p1y + 34, "Inference throughput (images / sec)", size=17, weight="700"))
+    lines.append(text(p1x + 24, p1y + 56, "Visers Nano vs. CPUBone Nano (ORT FP32), same CPU", size=12.5, fill=TEXT_MUTED))
 
+    cpub128 = 1000.0 / 3.580
+    cpub224 = 1000.0 / 5.403
     bars = [
-        ("6-Thread NanoSpinPool (256D)", 10083.2, "10,083 img/s · 0.094 ms/img", EMERALD),
-        ("1-Thread AVX2 (64D)", 1900.5, "1,901 img/s · 0.441 ms P50", EMERALD_BRIGHT),
-        ("1-Thread AVX2 (256D)", 1838.8, "1,839 img/s · 0.457 ms P50", INDIGO),
+        ("Visers Nano · 6 threads (NanoSpinPool)", NANO_THROUGHPUT_6T, EMERALD, "0.094 ms/img"),
+        ("Visers Nano · 1 thread (AVX2, 0.457 ms)", NANO_THROUGHPUT_1T, EMERALD_BRIGHT, f"{NANO_THROUGHPUT_1T / cpub128:.1f}× CPUBone Nano 128px"),
+        ("CPUBone Nano 128px · 1 thread (3.580 ms)", cpub128, INDIGO, ""),
+        ("CPUBone Nano 224px · 1 thread (5.403 ms)", cpub224, "#818CF8", ""),
     ]
-    bx0, by0, max_bw = p1x + 24, p1y + 92, p1w - 235
-    for idx, (label, val, note, col) in enumerate(bars):
-        yy = by0 + idx * 82
-        bw = (val / 10500.0) * max_bw
-        lines.append(f'  <text x="{bx0}" y="{yy}" font-family="{FONT_SANS}" font-size="13.5" font-weight="700" fill="{TEXT}">{escape(label)}</text>')
+    bx0, by0, max_bw = p1x + 24, p1y + 96, p1w - 48
+    for i, (label, val, col, note) in enumerate(bars):
+        yy = by0 + i * 74
+        bw = val / 10500.0 * max_bw
+        lines.append(text(bx0, yy, label, size=13.5, weight="700"))
         lines.append(f'  <rect x="{bx0}" y="{yy + 10}" width="{max_bw}" height="28" rx="6" fill="#E2E8F0" opacity="0.5"/>')
         lines.append(f'  <rect x="{bx0}" y="{yy + 10}" width="{bw:.1f}" height="28" rx="6" fill="{col}"/>')
-        lines.append(f'  <text x="{bx0 + bw + 10:.1f}" y="{yy + 29}" font-family="{FONT_MONO}" font-size="12" font-weight="700" fill="{TEXT}">{escape(note)}</text>')
+        main = f"{val:,.0f} img/s"
+        if bw > 0.6 * max_bw:
+            lines.append(text(bx0 + bw - 10, yy + 29, f"{main} · {note}", size=12, weight="700", fill="#FFFFFF", anchor="end", mono=True))
+        else:
+            tail = f" · {note}" if note else ""
+            lines.append(text(bx0 + bw + 10, yy + 29, main + tail, size=12, weight="700", fill=TEXT, mono=True))
+    lines.append(text(p1x + 24, p1y + p1h - 22, "CPUBone throughput = 1000 / P50 (1 thread, batch=1). Visers Nano 1-thread is the measured figure.", size=11, fill=TEXT_LIGHT))
 
-    # Right panel: Per-Stage Latency Breakdown (--profile)
-    p2x, p2y, p2w, p2h = 644, 106, 580, 350
+    p2x, p2y, p2w, p2h = 724, 106, 580, 420
     lines.append(f'  <rect x="{p2x}" y="{p2y}" width="{p2w}" height="{p2h}" rx="10" fill="{CARD_BG}" stroke="{BORDER}" stroke-width="1.5"/>')
-    lines.append(f'  <text x="{p2x + 24}" y="{p2y + 34}" font-family="{FONT_SANS}" font-size="17" font-weight="700" fill="{TEXT}">Per-Stage Latency Profile (594.5 µs total)</text>')
-    lines.append(f'  <text x="{p2x + 24}" y="{p2y + 56}" font-family="{FONT_SANS}" font-size="12.5" fill="{TEXT_MUTED}">Instrumented 1-thread breakdown (--profile)</text>')
-
+    lines.append(text(p2x + 24, p2y + 34, "Per-stage latency profile (594.5 µs total)", size=17, weight="700"))
+    lines.append(text(p2x + 24, p2y + 56, "Instrumented 1-thread breakdown (--profile)", size=12.5, fill=TEXT_MUTED))
     stages = [
         ("Pointwise 1×1 Convs", 228.7, 38.5, INDIGO),
         ("Fused RGB Stem + Block 0.0", 181.4, 30.5, EMERALD),
@@ -424,23 +349,18 @@ def build_runtime_profile_chart() -> str:
         ("Conv 3×3 (Block 1.0)", 61.7, 10.4, AMBER),
         ("GAP + Head + L2 Norm", 15.8, 2.7, SLATE),
     ]
-    # Stacked overview bar
-    sx0, sy0, sw = p2x + 24, p2y + 78, p2w - 48
-    cur_x = sx0
+    sx0, sy0, sw = p2x + 24, p2y + 82, p2w - 48
+    cur = sx0
     for _, us, _, col in stages:
-        seg_w = (us / 594.6) * sw
-        lines.append(f'  <rect x="{cur_x:.1f}" y="{sy0}" width="{seg_w:.1f}" height="22" fill="{col}"/>')
-        cur_x += seg_w
-
-    # Individual stage rows
-    for idx, (name, us, pct, col) in enumerate(stages):
-        ry = p2y + 128 + idx * 42
-        bar_len = (pct / 45.0) * 165
+        seg = us / 594.6 * sw
+        lines.append(f'  <rect x="{cur:.1f}" y="{sy0}" width="{seg:.1f}" height="22" fill="{col}"/>')
+        cur += seg
+    for i, (name, us, pct, col) in enumerate(stages):
+        ry = p2y + 150 + i * 46
         lines.append(f'  <rect x="{p2x + 24}" y="{ry - 11}" width="12" height="12" rx="3" fill="{col}"/>')
-        lines.append(f'  <text x="{p2x + 44}" y="{ry}" font-family="{FONT_SANS}" font-size="13" font-weight="600" fill="{TEXT}">{escape(name)}</text>')
-        lines.append(f'  <rect x="{p2x + 255}" y="{ry - 12}" width="{bar_len:.1f}" height="14" rx="4" fill="{col}" opacity="0.85"/>')
-        lines.append(f'  <text x="{p2x + 556}" y="{ry}" text-anchor="end" font-family="{FONT_MONO}" font-size="12.5" font-weight="700" fill="{TEXT_MUTED}">{us:5.1f} µs ({pct:4.1f}%)</text>')
-
+        lines.append(text(p2x + 44, ry, name, size=13, weight="600"))
+        lines.append(f'  <rect x="{p2x + 255}" y="{ry - 12}" width="{pct / 45.0 * 165:.1f}" height="14" rx="4" fill="{col}" opacity="0.85"/>')
+        lines.append(text(p2x + 556, ry, f"{us:5.1f} µs ({pct:4.1f}%)", size=12.5, weight="700", fill=TEXT_MUTED, anchor="end", mono=True))
     lines.append("</svg>")
     return "\n".join(lines)
 

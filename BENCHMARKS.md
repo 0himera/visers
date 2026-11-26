@@ -2,13 +2,13 @@
 
 All CPU timings were measured on **Intel Core i7-8700K @ 3.70 GHz** (Coffee Lake, AVX2/FMA, 32 KiB L1d / 256 KiB L2 per core, 12 MiB L3), pinned with `taskset`, excluding disk I/O and JPEG/PNG decoding.
 
-![Speed vs Quality Pareto Frontier](assets/pareto-speed-quality.png)
+![Speed vs quality, per task](assets/pareto-speed-quality.png)
 
 ---
 
 ## 1. Retrieval Quality
 
-![Per-Domain Quality and Strict Artist-Disjoint Split](assets/domain-comparison.png)
+![Per-task quality and throughput vs larger models](assets/domain-comparison.png)
 
 ### A. `abstract-v2` Held-Out Test (`5,940` images: `1,686` art + `4,254` photo)
 

@@ -3,7 +3,7 @@
 **Sub-millisecond CPU visual embeddings in pure Rust.**  
 `0.457 ms` per `128×128` RGB image · `10,083 img/s` on 6 cores · `0` heap allocations · `489 KiB` weights embedded in `.rodata`.
 
-![Speed vs Quality Pareto Frontier](assets/pareto-speed-quality.png)
+![Speed vs quality, per task](assets/pareto-speed-quality.png)
 
 `visers-nano` distills a `SigLIP2 Base` vision teacher into a quantization-aware `MobileNetV4-Conv-Small-0.50` backbone (`W8` symmetric per-channel weights + Matryoshka `256D` / `128D` / `64D` head) and compiles it into a dependency-free Rust crate with hand-tuned **AVX2 + FMA** kernels, fused RGB-to-uint8/float stem, and a **zero-allocation `NanoSpinPool`**.
 
@@ -80,11 +80,11 @@ Measured single-threaded on **Intel Core i7-8700K @ 3.70 GHz** (`taskset -c 0`, 
 | MobileCLIP2-S2 | ORT FP32 · 256px | 184.226 | 0.8019 | 0.5916 | — | 0.6274 |
 | *SigLIP2 Base (Teacher)* | *ViT-B/16 · 224px* | *—* | *0.8380* | *0.5907* | *—* | *0.6084* |
 
-![Per-Domain Quality and Strict Artist-Disjoint Split](assets/domain-comparison.png)
+![Per-task quality and throughput vs larger models](assets/domain-comparison.png)
 
 ### Runtime Throughput & Per-Stage Profile
 
-![Throughput Scaling and Stage Profile](assets/nano-throughput-profile.png)
+![Throughput vs CPUBone Nano and stage profile](assets/nano-throughput-profile.png)
 
 See [BENCHMARKS.md](BENCHMARKS.md) for full `visers-v6` artist-disjoint metrics, `Flowers102` OOD linear-probe scores, and FP32-vs-Rust parity checks.
 
