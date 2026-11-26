@@ -1,131 +1,121 @@
 # Visers Nano
 
-**Sub-millisecond, zero-allocation CPU visual embedding engine in pure Rust.**  
-Weights are quantized (`W8`) and baked directly into the binary's `.rodata` at compile time — zero Python, zero ONNX Runtime, zero runtime model downloads.
+**Sub-millisecond CPU visual embeddings in pure Rust.**  
+`0.457 ms` per `128×128` RGB image · `10,083 img/s` on 6 cores · `0` heap allocations · `489 KiB` weights embedded in `.rodata`.
 
-Inspired by [`flowercomputers/encoders`](https://github.com/flowercomputers/encoders), **Visers Nano** brings the same compile-time static embedding ergonomics to **128×128 RGB images** with Matryoshka dimensionality slicing (`dim-64`, `dim-128`, `dim-256`).
+![Speed vs Quality Pareto Frontier](assets/pareto-speed-quality.png)
 
----
-
-## Highlights
-
-- **0.457 ms** single-thread `P50` (`1,839 img/s`) from raw `128×128×3` `uint8` RGB to L2-normalized `256D` vector on Intel i7-8700K (`0.441 ms` at `64D`, **faster than ONNX Runtime** even before counting ONNX's preprocessing).
-- **0.0935 ms/image** (`10,083 img/s`) on 6 cores via the built-in lock-free spin-wait `NanoSpinPool` (bit-exact with single-thread inference).
-- **488.8 KiB** (`dim-256`) / **397.3 KiB** (`dim-64`) weights baked into `.rodata` (`build.rs`).
-- **0 heap allocations** during inference (`NanoWorkspace` + `NanoSpinPool`).
-- **Zero external Rust crate dependencies** (`Cargo.toml` `[dependencies]` is empty).
-- **Numerical parity `< 9e-7`** (`cosine > 0.9999994`) against the PyTorch `W8` model.
+`visers-nano` distills a `SigLIP2 Base` vision teacher into a quantization-aware `MobileNetV4-Conv-Small-0.50` backbone (`W8` symmetric per-channel weights + Matryoshka `256D` / `128D` / `64D` head) and compiles it into a dependency-free Rust crate with hand-tuned **AVX2 + FMA** kernels, fused RGB-to-uint8/float stem, and a **zero-allocation `NanoSpinPool`**.
 
 ---
 
 ## Quick Start
 
-### Encode a single `128×128×3` RGB buffer
+Add `visers-nano` to your `Cargo.toml` (weights are compiled directly into the binary — no external model files or ONNX Runtime needed):
+
+```toml
+[dependencies]
+visers-nano = { git = "https://github.com/0himera/visers-nano" }
+```
+
+Encode a `128×128×3` interleaved `RGB` (`u8`) image into an L2-normalized embedding:
 
 ```rust
-use visers_nano::{encode_single_rgb, NANO_EMBEDDING_DIM, RGB_BYTES};
+use visers_nano::{encode_rgb128, DIM};
 
-fn main() -> Result<(), &'static str> {
-    let rgb = vec![128u8; RGB_BYTES]; // 128 * 128 * 3 uint8 RGB
-    let emb: [f32; NANO_EMBEDDING_DIM] = encode_single_rgb(&rgb)?;
-    assert_eq!(emb.len(), 256); // or 128 / 64 via Cargo features
-    Ok(())
+fn main() {
+    let rgb = vec![128u8; 128 * 128 * 3];
+    let embedding: [f32; DIM] = encode_rgb128(&rgb);
+    println!("dim={}, norm_sq={:.6}", embedding.len(), embedding.iter().map(|x| x * x).sum::<f32>());
 }
 ```
 
-### Zero-allocation explicit workspace & multi-core `NanoSpinPool`
+> **Always run in `--release` mode.** Debug builds disable SIMD inlining and are ~15× slower.
+
+For high-throughput workloads with zero per-call allocations, reuse a `NanoScratch` buffer or `NanoSpinPool`:
 
 ```rust
-use std::sync::Arc;
-use visers_nano::{NanoEncoder, NanoSpinPool, RGB_BYTES};
+use visers_nano::{encode_rgb128_into, NanoScratch, NanoSpinPool, DIM};
 
-fn main() -> Result<(), &'static str> {
-    let encoder = Arc::new(NanoEncoder::baked()?);
-    let mut ws = encoder.workspace();
-    let dim = encoder.embedding_dim();
+// Single-thread zero-alloc loop
+let mut scratch = NanoScratch::new();
+let mut out = [0.0f32; DIM];
+encode_rgb128_into(&rgb, &mut scratch, &mut out);
 
-    // Single image (0 heap allocations)
-    let img = vec![0u8; RGB_BYTES];
-    let mut out = vec![0.0f32; dim];
-    encoder.encode_rgb(&img, &mut ws, &mut out)?;
-
-    // Multi-core batch (lock-free spin-wait, 0 heap allocations, bit-exact)
-    let pool = NanoSpinPool::new(Arc::clone(&encoder), 6);
-    let batch = vec![img.as_slice(); 128];
-    let mut batch_out = vec![0.0f32; 128 * dim];
-    pool.encode_batch(&batch, &mut ws, &mut batch_out)?;
-    Ok(())
-}
-```
-
-### Compile-time Matryoshka feature flags
-
-```bash
-# Default: 256D + runtime AVX2/FMA SIMD (500,572 B baked)
-cargo test --release
-
-# 128D Matryoshka slice
-cargo test --release --no-default-features --features dim-128,simd
-
-# 64D Matryoshka slice (406,876 B baked)
-cargo test --release --no-default-features --features dim-64,simd
-```
-
-To override the baked weights path at build time:
-
-```bash
-VISERS_NANO_WEIGHTS=/path/to/nano_v1.bin cargo build --release
+// Multi-core batch encoding (10,083 img/s on 6 threads)
+let pool = NanoSpinPool::new(6);
+pool.encode_batch_rgb128(&batch_rgb, &mut batch_out);
 ```
 
 ---
 
-## Comparison Against Baselines
+## Why Visers Nano?
 
-All `abstract-v2` held-out test metrics (`5,940` images: `1,686` art + `4,254` photo) and single-thread `i7-8700K` CPU latencies (`batch = 1`, `P50 ms`, no disk/image-file decode):
+- **Zero runtime dependencies:** No ONNX Runtime, no PyTorch/libtorch, no Python, no filesystem I/O at startup.
+- **Sub-millisecond CPU latency:** `0.457 ms` P50 single-thread (`1,839 img/s`), `0.094 ms/img` across 6 cores (`10,083 img/s`).
+- **4.2× faster & +0.147 nDCG@10 over `Visers v0.3`:** Replaces legacy custom micro-CNNs with a `SigLIP2`-distilled `MobileNetV4` trunk.
+- **11.8× faster than `CPUBone Nano (224px)`** at matching retrieval quality (`0.531` vs `0.533` selection nDCG@10).
+- **Matryoshka (MRL) dimension flags:** Select `dim-256` (default, `489 KiB`), `dim-128` (`428 KiB`), or `dim-64` (`397 KiB`) at compile time.
+- **Portable x86_64 + scalar fallback:** Uses `is_x86_feature_detected!("avx2")` + `fma` at runtime and automatically falls back to scalar code on non-AVX2 CPUs.
 
-| Model | Backend & Input | Weights (INT8 / file) | CPU P50 (ms) | Art Style | Art Genre | Photo (COCO) |
+---
+
+## Benchmarks
+
+### Retrieval Quality & Latency (`abstract-v2`, 5,940 images)
+
+Measured single-threaded on **Intel Core i7-8700K @ 3.70 GHz** (`taskset -c 0`, excluding disk I/O and JPEG/PNG decoding):
+
+| Model | Backend | CPU P50 (ms) | Art Style | Art Genre | Cross-Genre | Photo (COCO) |
 |---|---|---:|---:|---:|---:|---:|
-| **Visers Nano (`dim-256`)** | **Rust AVX2/FMA · 128px RGB** | **489 KiB** (`.rodata`) | **0.457** | **0.7686** | **0.5291** | **0.4126** |
-| **Visers Nano (`dim-64`)** | **Rust AVX2/FMA · 128px RGB** | **397 KiB** (`.rodata`) | **0.441** | — | — | — |
-| Visers Nano (ORT baseline) | ONNX Runtime FP32 · 128px RGB | 1.8 MiB FP32 | 0.748 (0.562 tensor) | 0.7686 | 0.5291 | 0.4126 |
-| Visers v0.2 | Rust · 128px RGB | 2.6 MiB FP32 | 1.279 | 0.6451 | 0.3724 | 0.2082 |
-| Visers v3 (`v0.3` specialists) | Rust AVX2/FMA · 128px RGB | — | 1.916 | 0.6688 | 0.4107 | 0.2269 |
-| CPUBone Nano (zero-shot) | ONNX Runtime FP32 · 128px | 4.7 MiB INT8 | 3.580 (2.634 tensor) | 0.7160 | 0.4675 | 0.3982 |
-| CPUBone Nano (zero-shot) | ONNX Runtime FP32 · 224px | 4.7 MiB INT8 | 5.403 | 0.7332 | 0.4883 | 0.4560 |
-| CPUBone B0 (zero-shot) | ONNX Runtime FP32 · 224px | 8.4 MiB INT8 | 11.475 | 0.7304 | 0.4843 | 0.4903 |
-| TinyCLIP 8M | ONNX Runtime FP32 · 224px | ~8M params | 37.405 | 0.7741 | 0.5363 | 0.5152 |
-| MobileCLIP2-S0 | ONNX Runtime FP32 · 256px | — | 65.803 | 0.7718 | 0.5707 | 0.5953 |
-| MobileCLIP2-S2 | ONNX Runtime FP32 · 256px | — | 184.226 | 0.8019 | 0.5916 | 0.6274 |
-| SigLIP2 Base (teacher) | ViT-B/16 · 224px (GPU) | 92.9M params | — | 0.8380 | 0.5907 | 0.6084 |
+| **Visers Nano (`W8`, `256D`)** | **Rust AVX2 · 128px** | **0.457** | **0.7686** | **0.5291** | **0.6776** | **0.4126** |
+| Visers Nano (`FP32`, `256D`) | ORT · 128px | 0.748 | 0.7686 | 0.5291 | 0.6776 | 0.4126 |
+| Visers v0.2 | Rust · 128px | 1.279 | 0.6451 | 0.3724 | — | 0.2082 |
+| Visers v3 (`v0.3`) | Rust AVX2 · 128px | 1.916 | 0.6688 | 0.4107 | 0.5888 | 0.2269 |
+| CPUBone Nano | ORT FP32 · 128px | 3.580 | 0.7160 | 0.4675 | 0.6081 | 0.3982 |
+| CPUBone Nano | ORT FP32 · 224px | 5.403 | 0.7332 | 0.4883 | 0.6203 | 0.4560 |
+| CPUBone B0 | ORT FP32 · 224px | 11.475 | 0.7304 | 0.4843 | — | 0.4903 |
+| TinyCLIP 8M | ORT FP32 · 224px | 37.405 | 0.7741 | 0.5363 | — | 0.5152 |
+| MobileCLIP2-S0 | ORT FP32 · 256px | 65.803 | 0.7718 | 0.5707 | — | 0.5953 |
+| MobileCLIP2-S2 | ORT FP32 · 256px | 184.226 | 0.8019 | 0.5916 | — | 0.6274 |
+| *SigLIP2 Base (Teacher)* | *ViT-B/16 · 224px* | *—* | *0.8380* | *0.5907* | *—* | *0.6084* |
 
-See [BENCHMARKS.md](BENCHMARKS.md) for the strict artist-disjoint `visers-v6` test comparison, `Flowers102` out-of-distribution probe, Matryoshka `64/128/256` breakdown, per-stage CPU profile, and PyTorch parity details.
+![Per-Domain Quality and Strict Artist-Disjoint Split](assets/domain-comparison.png)
 
----
+### Runtime Throughput & Per-Stage Profile
 
-## Architecture & Engine Design
+![Throughput Scaling and Stage Profile](assets/nano-throughput-profile.png)
 
-- **Backbone**: `mobilenetv4_conv_small_050.e3000_r224_in1k` `features_only` trunk (`45` folded `Conv2d + ReLU` layers, `20.64M` MACs at `128×128`, all intermediate channels multiples of `16`) + `Linear(480 → 256)` Matryoshka head (`458,480` total parameters).
-- **Distillation**: `SigLIP2 Base` (`google/siglip2-base-patch16-224`) PCA-256 relational distillation (`cosine + KL rank + Gram`) across `~278k` images (`100k ImageNet-1k + 100k CC3M + 77.8k WikiArt/COCO`), followed by `Conv+BN` folding and `2,000` steps of `W8` quantization-aware training.
-- **CPU Runtime (`src/lib.rs`)**:
-  - **Fused Stem + Block 0.0**: `conv_stem` (`3→32`, `3.54M` MACs) and `blocks.0.0` (`32→16`, `4.72M` MACs) execute row-by-row through a 64B-aligned `24 KiB` L1d ring buffer + `4.6 KiB` rolling RGB LUT strip, keeping all activations inside L1d/L2.
-  - **64-byte aligned arena + anti-4K-aliasing stagger** (`+64B` offset between ping-pong buffers).
-  - **Register-tiled AVX2/FMA microkernels** (`8..12` YMM accumulators in flight) + portable scalar fallback.
-  - **RAII `FTZ | DAZ`** (`MXCSR |= 0x8040`) during `x86_64` inference.
+See [BENCHMARKS.md](BENCHMARKS.md) for full `visers-v6` artist-disjoint metrics, `Flowers102` OOD linear-probe scores, and FP32-vs-Rust parity checks.
 
 ---
+
+## Cargo Features
+
+| Feature | Embedding Dim | `.rodata` Weights | Rust vs FP32 Max Diff |
+|---|---:|---:|---:|
+| `dim-256` *(default)* | `256` | `500,572 B` (`489 KiB`) | `8.34e-7` |
+| `dim-128` | `128` | `438,556 B` (`428 KiB`) | `8.94e-7` |
+| `dim-64` | `64` | `406,876 B` (`397 KiB`) | `8.94e-7` |
+
+```toml
+# Example: 64D embeddings (397 KiB weights, 0.441 ms P50)
+visers-nano = { git = "https://github.com/0himera/visers-nano", default-features = false, features = ["dim-64"] }
+```
 
 ## CLI & Benchmarks
 
 ```bash
-# Run unit, SIMD/scalar parity, zero-alloc, and spin-pool tests
-cargo test --release
+# Run single-thread + 6-thread NanoSpinPool benchmarks
+cargo run --release --bin nano_rgb -- --bench
 
-# Single-thread CPU latency benchmark on raw 128x128x3 RGB corpus
-cargo run --release --example nano_rgb -- /path/to/corpus.rgb --bench
+# Print per-stage microsecond profile
+cargo run --release --bin nano_rgb -- --profile
 
-# Per-stage microsecond breakdown
-cargo run --release --example nano_rgb -- /path/to/corpus.rgb --profile
-
-# Multi-core lock-free spin-pool benchmark (e.g. 6 threads)
-cargo run --release --example nano_rgb -- /path/to/corpus.rgb --bench-batch 6
+# Encode a raw 128x128 RGB file or directory
+cargo run --release --bin nano_rgb -- path/to/image_128x128.rgb
 ```
+
+## License
+
+Dual-licensed under **MIT** or **Apache-2.0**. See [ARCHITECTURE.md](ARCHITECTURE.md) for details on the `VSN1` weight format and SIMD kernel design.
