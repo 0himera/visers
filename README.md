@@ -2,7 +2,9 @@
 
 ![Visers banner featuring a prism and a stream of images](assets/banner.webp)
 
-**Visers** is a pure Rust CPU inference engine built for the **Nano** visual encoder. The `visers-nano` crate bundles the runtime and model weights.
+**Visers** is a pure Rust CPU inference engine for fast visual embeddings.
+
+The included **Nano** model encodes `128×128` RGB images into L2-normalized vectors.
 
 `0.431 ms` P50 per `128×128` RGB image · `13,224 img/s` on 6 cores · `0` heap allocations · `489 KiB` weights embedded in `.rodata`.
 
@@ -16,17 +18,17 @@ Visers Nano's approach to embedding model weights at compile time was inspired b
 
 ## Quick Start
 
-Add `visers-nano` to your `Cargo.toml` (weights are compiled directly into the binary — no external model files or ONNX Runtime needed):
+Add Visers to your `Cargo.toml`. This configuration imports the `visers-nano` package as `visers` and embeds the Nano weights at build time.
 
 ```toml
 [dependencies]
-visers-nano = { git = "https://github.com/0himera/visers" }
+visers = { package = "visers-nano", git = "https://github.com/0himera/visers" }
 ```
 
 Encode a `128×128×3` interleaved `RGB` (`u8`) image into an L2-normalized embedding:
 
 ```rust
-use visers_nano::{encode_single_rgb, RGB_BYTES};
+use visers::{encode_single_rgb, RGB_BYTES};
 
 fn main() -> Result<(), &'static str> {
     let rgb = vec![128u8; RGB_BYTES];
@@ -81,7 +83,7 @@ Reuse a `NanoWorkspace` and output buffers for allocation-free encoding. A persi
 
 ```rust
 use std::sync::Arc;
-use visers_nano::{NanoEncoder, NanoSpinPool, RGB_BYTES};
+use visers::{NanoEncoder, NanoSpinPool, RGB_BYTES};
 
 fn main() -> Result<(), &'static str> {
     let first = vec![128u8; RGB_BYTES];
@@ -126,7 +128,7 @@ fn main() -> Result<(), &'static str> {
 
 ```toml
 # Example: 64D embeddings (397 KiB weights, 0.441 ms P50)
-visers-nano = { git = "https://github.com/0himera/visers", default-features = false, features = ["dim-64", "simd"] }
+visers = { package = "visers-nano", git = "https://github.com/0himera/visers", default-features = false, features = ["dim-64", "simd"] }
 ```
 
 ## CLI & Benchmarks
