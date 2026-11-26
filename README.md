@@ -1,12 +1,10 @@
 ![Visers banner featuring a prism and a stream of images](assets/banner.webp)
 
-# Visers
+# Visers <a href="https://huggingface.co/0himera/visers-nano"><img align="right" height="24" src="https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-md.svg" alt="Visers Nano on Hugging Face"></a>
 
 **Visers** is a pure Rust CPU inference engine for fast visual embeddings.
 
 The included **Nano** model encodes `128×128` RGB images into L2-normalized vectors.
-
-[![Visers Nano on Hugging Face](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-md.svg)](https://huggingface.co/0himera/visers-nano)
 
 `0.431 ms` P50 per `128×128` RGB image · `13,224 img/s` on 6 cores · `0` heap allocations · `489 KiB` weights embedded in `.rodata`.
 
