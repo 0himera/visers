@@ -1,11 +1,12 @@
-//! Unit, parity, zero-alloc, and lock-free spin-pool tests for `nano-v1`.
+//! Validation, parity, zero-allocation, and spin-pool tests for `nano-v1`.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
+use std::thread;
 use visers_nano::{
-    encode_single_rgb, NanoEncoder, NanoSpinPool, NANO_BAKED_AVAILABLE, NANO_EMBEDDING_DIM,
-    RGB_BYTES,
+    encode_single_rgb, NanoEncoder, NanoSpinPool, NanoWorkspace, NANO_BAKED_AVAILABLE,
+    NANO_EMBEDDING_DIM, RGB_BYTES,
 };
 
 thread_local! {
@@ -96,6 +97,78 @@ fn nano_zero_alloc_and_input_validation() {
 }
 
 #[test]
+fn nano_rejects_incompatible_vsn1_graphs() {
+    let weights = include_bytes!("../weights/nano_v1.bin");
+    let num_ops = u32::from_le_bytes(weights[8..12].try_into().unwrap());
+    let mut offset = 44;
+    let offsets: Vec<_> = (0..num_ops)
+        .map(|_| {
+            let start = offset;
+            let co = u16::from_le_bytes(weights[start + 2..start + 4].try_into().unwrap());
+            let size = u32::from_le_bytes(weights[start + 12..start + 16].try_into().unwrap());
+            offset += 16 + usize::from(co) * 8 + size as usize;
+            start
+        })
+        .collect();
+
+    let cases = [
+        ("channel chain", offsets[2], 32, "invalid VSN1 op shape"),
+        (
+            "depthwise channels",
+            offsets[5] + 2,
+            48,
+            "invalid VSN1 op shape",
+        ),
+        (
+            "pointwise stride",
+            offsets[2] + 5,
+            2,
+            "unsupported VSN1 convolution geometry",
+        ),
+        (
+            "activation size",
+            offsets[2] + 2,
+            32,
+            "VSN1 activation exceeds workspace",
+        ),
+        (
+            "residual size",
+            offsets[2] + 9,
+            1,
+            "invalid VSN1 residual save",
+        ),
+        (
+            "residual without save",
+            offsets[4] + 10,
+            1,
+            "invalid VSN1 residual add",
+        ),
+        (
+            "residual shape mismatch",
+            offsets[9] + 10,
+            1,
+            "invalid VSN1 residual add",
+        ),
+        (
+            "head input",
+            12,
+            240,
+            "VSN1 head input does not match final activation",
+        ),
+    ];
+
+    for (name, offset, value, error) in cases {
+        let mut invalid = weights.to_vec();
+        invalid[offset] = value;
+        assert_eq!(
+            NanoEncoder::from_bytes(&invalid).err(),
+            Some(error),
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn nano_spin_pool_bit_exact_and_zero_alloc() {
     let model = Arc::new(NanoEncoder::baked().expect("baked nano model"));
     let mut ws = model.workspace();
@@ -113,6 +186,12 @@ fn nano_spin_pool_bit_exact_and_zero_alloc() {
 
     let pool = NanoSpinPool::new(Arc::clone(&model), 4);
     let mut actual = vec![0.0f32; imgs.len() * dim];
+    let mut wrong_workspace = NanoWorkspace::new(0);
+    assert_eq!(
+        pool.encode_batch(&refs, &mut wrong_workspace, &mut actual),
+        Err("nano-v1 output/workspace mismatch")
+    );
+    assert!(actual.iter().all(|&value| value == 0.0));
     pool.encode_batch(&refs, &mut ws, &mut actual).unwrap();
     assert_eq!(actual, expected);
 
@@ -122,4 +201,37 @@ fn nano_spin_pool_bit_exact_and_zero_alloc() {
     TRACKING.with(|t| t.set(false));
     assert_eq!(ALLOCS.with(|c| c.get()), 0, "expected 0 batch dispatch allocations");
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn nano_spin_pool_supports_concurrent_callers() {
+    let model = Arc::new(NanoEncoder::baked().unwrap());
+    let pool = NanoSpinPool::new(Arc::clone(&model), 3);
+    let start = Barrier::new(3);
+    let dim = model.embedding_dim();
+
+    thread::scope(|scope| {
+        for caller in 0..3 {
+            let (model, pool, start) = (&model, &pool, &start);
+            scope.spawn(move || {
+                let mut ws = model.workspace();
+                let images: Vec<_> = (0..3 + caller)
+                    .map(|idx| pseudo_rgb(caller * 10 + idx))
+                    .collect();
+                let refs: Vec<_> = images.iter().map(Vec::as_slice).collect();
+                let mut expected = vec![0.0; images.len() * dim];
+                for (&rgb, out) in refs.iter().zip(expected.chunks_exact_mut(dim)) {
+                    model.encode_rgb(rgb, &mut ws, out).unwrap();
+                }
+
+                let mut actual = vec![0.0; expected.len()];
+                start.wait();
+                for _ in 0..4 {
+                    actual.fill(0.0);
+                    pool.encode_batch(&refs, &mut ws, &mut actual).unwrap();
+                    assert_eq!(actual, expected);
+                }
+            });
+        }
+    });
 }

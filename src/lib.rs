@@ -6,15 +6,16 @@
 //! - Single 64-byte-aligned workspace arena with `+64B` anti-4K-aliasing stagger between buffers.
 //! - Register-tiled AVX2/FMA microkernels (`8..12` YMM accumulators) saturating 2 FMA/cycle ports.
 //! - Stack RAII `FTZ | DAZ` (`MXCSR = 0x8040`) guard during `x86_64` inference.
-//! - Lock-free spin-wait `NanoSpinPool` for zero-mutex multi-core batch encoding.
+//! - Persistent `NanoSpinPool` for zero-mutex multi-core batch encoding.
 
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 use core::arch::x86_64::*;
 use core::hint::spin_loop;
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 use std::time::Instant;
 
 pub const RGB_SIDE: usize = 128;
@@ -77,6 +78,7 @@ impl AlignedF32 {
         unsafe { core::slice::from_raw_parts_mut(ptr, self.len) }
     }
 
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     #[inline(always)]
     fn as_ptr(&self) -> *const f32 {
         self.lines.as_ptr() as *const f32
@@ -230,7 +232,7 @@ pub struct NanoEncoder {
 }
 
 impl NanoEncoder {
-    /// Parses a `VSN1` binary model (allocates once during initialization).
+    /// Parses a `VSN1` model and checks its graph against the inference workspace layout.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
         let mut r = Reader { data: bytes, offset: 0 };
         if r.take(4)? != b"VSN1" {
@@ -247,6 +249,9 @@ impl NanoEncoder {
         }
         let mean = [r.f32()?, r.f32()?, r.f32()?];
         let std = [r.f32()?, r.f32()?, r.f32()?];
+        if num_ops > (bytes.len() - r.offset) / 16 {
+            return Err("truncated VSN1 op descriptors");
+        }
         if std.iter().any(|&s| s <= 0.0) {
             return Err("invalid VSN1 normalization std");
         }
@@ -257,7 +262,10 @@ impl NanoEncoder {
             }
         }
 
-        let mut ops = Vec::with_capacity(num_ops);
+        let mut ops = Vec::new();
+        let mut side = RGB_SIDE;
+        let mut channels = 3;
+        let mut skip_shape = None;
         for op_idx in 0..num_ops {
             let ci = r.u16()?;
             let co = r.u16()?;
@@ -271,21 +279,51 @@ impl NanoEncoder {
             let _reserved = r.u8()?;
             let weight_len = r.u32()?;
 
-            let expected_len = if dw { k * k * co } else { k * k * ci * co };
-            if weight_len != expected_len || !co.is_multiple_of(16) {
+            if ci != channels || co == 0 || !co.is_multiple_of(16) || (dw && ci != co) {
                 return Err("invalid VSN1 op shape");
             }
-            if op_idx > 0 && !ci.is_multiple_of(16) {
-                return Err("invalid VSN1 intermediate channel alignment");
-            }
-            if op_idx == 0 && (ci != 3 || co != 32 || k != 3 || s != 2 || p != 1 || dw || save_skip || add_skip) {
+            if op_idx == 0
+                && (co != 32 || k != 3 || s != 2 || p != 1 || dw || save_skip || add_skip)
+            {
                 return Err("unexpected VSN1 stem op");
             }
-            if op_idx == 1 && (ci != 32 || co != 16 || k != 3 || s != 2 || p != 1 || dw || save_skip || add_skip) {
+            if op_idx == 1
+                && (co != 16 || k != 3 || s != 2 || p != 1 || dw || save_skip || add_skip)
+            {
                 return Err("unexpected VSN1 block0.0 op");
             }
-            if !matches!(s, 1 | 2) || (dw && !matches!(k, 3 | 5)) || (!dw && !matches!(k, 1 | 3)) {
-                return Err("unsupported VSN1 kernel or stride");
+            let supported_kernel = if dw {
+                matches!(k, 3 | 5)
+            } else {
+                matches!(k, 1 | 3)
+            };
+            if !supported_kernel || !matches!(s, 1 | 2) || (k == 1 && s != 1) || p != k / 2 {
+                return Err("unsupported VSN1 convolution geometry");
+            }
+            if !side.is_multiple_of(s) {
+                return Err("invalid VSN1 spatial dimensions");
+            }
+            let out_side = side / s;
+            // The first convolution uses the fused stem ring. All later outputs use buf_a/b.
+            if op_idx != 0 && out_side * out_side * co > BUF_FLOATS {
+                return Err("VSN1 activation exceeds workspace");
+            }
+            if save_skip {
+                if skip_shape.is_some() || side * side * ci > SKIP_FLOATS {
+                    return Err("invalid VSN1 residual save");
+                }
+                skip_shape = Some((side, ci));
+            }
+            if add_skip && (k != 1 || skip_shape.take() != Some((out_side, co))) {
+                return Err("invalid VSN1 residual add");
+            }
+
+            let inputs_per_tap = if dw { 1 } else { ci };
+            let expected_len = (k * k * inputs_per_tap)
+                .checked_mul(co)
+                .ok_or("VSN1 op size overflow")?;
+            if weight_len != expected_len {
+                return Err("invalid VSN1 op weight length");
             }
 
             let scales = r.f32_aligned(co)?;
@@ -310,15 +348,26 @@ impl NanoEncoder {
                 biases,
                 weights,
             });
+            side = out_side;
+            channels = co;
+        }
+        if skip_shape.is_some() {
+            return Err("unfinished VSN1 residual");
+        }
+        if head_in != channels {
+            return Err("VSN1 head input does not match final activation");
         }
 
+        let head_weight_len = head_out
+            .checked_mul(head_in)
+            .ok_or("VSN1 head size overflow")?;
         let head_scales = r.f32_aligned(head_out)?;
         let head_biases = r.f32_aligned(head_out)?;
-        let q_head = r.take(head_out * head_in)?;
+        let q_head = r.take(head_weight_len)?;
         if r.offset != bytes.len() {
             return Err("trailing bytes in VSN1 file");
         }
-        let mut head_weights = AlignedF32::zeros(head_out * head_in);
+        let mut head_weights = AlignedF32::zeros(head_weight_len);
         let hs_slice = head_scales.as_slice();
         let hw_slice = head_weights.as_mut_slice();
         for row in 0..head_out {
@@ -1971,14 +2020,27 @@ struct SpinPoolShared {
     worker_count: usize,
     epoch: AtomicU64,
     shutdown: AtomicBool,
+    batch_active: AtomicBool,
     next_idx: AtomicUsize,
     done: AtomicUsize,
-    images_ptr: AtomicUsize,
+    images_ptr: AtomicPtr<()>,
     images_len: AtomicUsize,
-    out_ptr: AtomicUsize,
+    out_ptr: AtomicPtr<f32>,
 }
 
-/// Lock-free spin-wait thread pool for zero-mutex multi-core `nano-v1` batch encoding.
+struct ActiveBatch<'a>(&'a SpinPoolShared);
+
+impl Drop for ActiveBatch<'_> {
+    fn drop(&mut self) {
+        // Every worker must stop using the borrowed buffers before this call can return or unwind.
+        while self.0.done.load(Ordering::Acquire) < self.0.worker_count {
+            spin_loop();
+        }
+        self.0.batch_active.store(false, Ordering::Release);
+    }
+}
+
+/// Persistent spin-wait thread pool for multi-core `nano-v1` batch encoding.
 pub struct NanoSpinPool {
     shared: Arc<SpinPoolShared>,
     workers: Vec<JoinHandle<()>>,
@@ -1995,11 +2057,12 @@ impl NanoSpinPool {
             worker_count,
             epoch: AtomicU64::new(0),
             shutdown: AtomicBool::new(false),
+            batch_active: AtomicBool::new(false),
             next_idx: AtomicUsize::new(0),
             done: AtomicUsize::new(0),
-            images_ptr: AtomicUsize::new(0),
+            images_ptr: AtomicPtr::new(core::ptr::null_mut()),
             images_len: AtomicUsize::new(0),
-            out_ptr: AtomicUsize::new(0),
+            out_ptr: AtomicPtr::new(core::ptr::null_mut()),
         });
 
         let mut workers = Vec::with_capacity(worker_count);
@@ -2032,15 +2095,15 @@ impl NanoSpinPool {
                     seen_epoch = curr;
 
                     let len = s.images_len.load(Ordering::Relaxed);
-                    let img_base = s.images_ptr.load(Ordering::Relaxed) as *const &[u8];
-                    let out_base = s.out_ptr.load(Ordering::Relaxed) as *mut f32;
+                    let img_base = s.images_ptr.load(Ordering::Relaxed).cast::<&[u8]>();
+                    let out_base = s.out_ptr.load(Ordering::Relaxed);
                     loop {
                         let idx = s.next_idx.fetch_add(1, Ordering::Relaxed);
                         if idx >= len {
                             break;
                         }
-                        // SAFETY: coordinator validates all slices and waits for `done == worker_count`
-                        // before returning, so `img_base[idx]` and `out_base[idx*dim..]` are disjoint and live.
+                        // SAFETY: the active batch keeps both buffers alive until all workers
+                        // finish. Each index has one owner and a disjoint output slice.
                         unsafe {
                             let img = *img_base.add(idx);
                             let dst = core::slice::from_raw_parts_mut(out_base.add(idx * dim), dim);
@@ -2060,6 +2123,7 @@ impl NanoSpinPool {
     }
 
     /// Encodes `images` into `out` (`images.len() * dim`) with zero heap allocations and zero mutexes.
+    /// With background workers, concurrent callers wait for the active batch to finish.
     pub fn encode_batch(
         &self,
         images: &[&[u8]],
@@ -2079,6 +2143,9 @@ impl NanoSpinPool {
                 return Err("nano-v1 expects 128x128x3 RGB bytes");
             }
         }
+        if ws_main.head_in != self.shared.encoder.head_in {
+            return Err("nano-v1 output/workspace mismatch");
+        }
 
         if self.shared.worker_count == 0 {
             for (i, &im) in images.iter().enumerate() {
@@ -2089,37 +2156,42 @@ impl NanoSpinPool {
             return Ok(());
         }
 
+        let shared = &*self.shared;
+        while shared
+            .batch_active
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            thread::yield_now();
+        }
+
         let len = images.len();
-        self.shared.next_idx.store(0, Ordering::Relaxed);
-        self.shared.done.store(0, Ordering::Relaxed);
-        self.shared
+        let out_ptr = out.as_mut_ptr();
+        shared.next_idx.store(0, Ordering::Relaxed);
+        shared.done.store(0, Ordering::Relaxed);
+        shared
             .images_ptr
-            .store(images.as_ptr() as usize, Ordering::Relaxed);
-        self.shared.images_len.store(len, Ordering::Relaxed);
-        self.shared
-            .out_ptr
-            .store(out.as_mut_ptr() as usize, Ordering::Relaxed);
+            .store(images.as_ptr().cast_mut().cast(), Ordering::Relaxed);
+        shared.images_len.store(len, Ordering::Relaxed);
+        shared.out_ptr.store(out_ptr, Ordering::Relaxed);
 
         // Release all workers simultaneously
-        self.shared.epoch.fetch_add(1, Ordering::Release);
+        shared.epoch.fetch_add(1, Ordering::Release);
+        let _batch = ActiveBatch(shared);
 
         // Calling thread participates in dynamic work stealing
-        let out_ptr = out.as_mut_ptr();
         loop {
-            let idx = self.shared.next_idx.fetch_add(1, Ordering::Relaxed);
+            let idx = shared.next_idx.fetch_add(1, Ordering::Relaxed);
             if idx >= len {
                 break;
             }
             // SAFETY: each `idx` is claimed exclusively via atomic `fetch_add`.
             unsafe {
                 let dst = core::slice::from_raw_parts_mut(out_ptr.add(idx * dim), dim);
-                self.shared.encoder.encode_rgb(images[idx], ws_main, dst)?;
+                shared.encoder.encode_rgb(images[idx], ws_main, dst)?;
             }
         }
 
-        while self.shared.done.load(Ordering::Acquire) < self.shared.worker_count {
-            spin_loop();
-        }
         Ok(())
     }
 }
@@ -2134,7 +2206,7 @@ impl Drop for NanoSpinPool {
     }
 }
 
-static BAKED_ENCODER: OnceLock<NanoEncoder> = OnceLock::new();
+static BAKED_ENCODER: OnceLock<Result<NanoEncoder, &'static str>> = OnceLock::new();
 
 thread_local! {
     static THREAD_WS: RefCell<Option<NanoWorkspace>> = const { RefCell::new(None) };
@@ -2143,9 +2215,10 @@ thread_local! {
 /// Encodes a single `128x128x3` RGB buffer using the compile-time `.rodata` baked `nano-v1` model.
 /// Zero heap allocations after the first call on the calling thread.
 pub fn encode_single_rgb(rgb: &[u8]) -> Result<[f32; NANO_EMBEDDING_DIM], &'static str> {
-    let encoder = BAKED_ENCODER.get_or_init(|| {
-        NanoEncoder::baked().expect("nano-v1 weights were not baked into binary")
-    });
+    let encoder = BAKED_ENCODER
+        .get_or_init(NanoEncoder::baked)
+        .as_ref()
+        .map_err(|&err| err)?;
     let mut out = [0.0f32; NANO_EMBEDDING_DIM];
     THREAD_WS.with(|cell| {
         let mut borrow = cell.borrow_mut();
