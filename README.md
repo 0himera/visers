@@ -1,8 +1,8 @@
+[Visers banner featuring a prism and a stream of images](assets/banner.webp)
+
 # Visers
 
-![Visers banner featuring a prism and a stream of images](assets/banner.webp)
-
-**Visers** is a pure Rust CPU inference engine for fast visual embeddings.
+!**Visers** is a pure Rust CPU inference engine for fast visual embeddings.
 
 The included **Nano** model encodes `128×128` RGB images into L2-normalized vectors.
 
@@ -10,7 +10,7 @@ The included **Nano** model encodes `128×128` RGB images into L2-normalized vec
 
 Nano uses a `MobileNetV4-Conv-Small-0.50` backbone distilled from `SigLIP2 Base` with symmetric per-channel `W8` weights and a Matryoshka `256D` / `128D` / `64D` head. The dependency-free Rust runtime uses hand-tuned **AVX2 + FMA** kernels, a fused RGB stem, and a **zero-allocation `NanoSpinPool`**.
 
-Visers Nano's approach to embedding model weights at compile time was inspired by [`flowercomputers/encoders`](https://github.com/flowercomputers/encoders).
+Visers approach to embedding model weights at compile time was inspired by [`flowercomputers/encoders`](https://github.com/flowercomputers/encoders).
 
 [Quick Start](#quick-start) · [Benchmarks](#benchmarks) · [Batch Encoding](#batch-encoding) · [Cargo Features](#cargo-features) · [Architecture](ARCHITECTURE.md)
 
