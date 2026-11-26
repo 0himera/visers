@@ -1,11 +1,12 @@
-# Visers Nano
+# Visers
 
-![Visers Nano banner featuring a prism and a stream of images](assets/banner.webp)
+![Visers banner featuring a prism and a stream of images](assets/banner.webp)
 
-**Sub-millisecond CPU visual embeddings in pure Rust.**  
+**Visers** is a pure Rust CPU inference engine built for the **Nano** visual encoder. The `visers-nano` crate bundles the runtime and model weights.
+
 `0.431 ms` P50 per `128×128` RGB image · `13,224 img/s` on 6 cores · `0` heap allocations · `489 KiB` weights embedded in `.rodata`.
 
-`visers-nano` distills a `SigLIP2 Base` vision teacher into a quantization-aware `MobileNetV4-Conv-Small-0.50` backbone (`W8` symmetric per-channel weights + Matryoshka `256D` / `128D` / `64D` head) and compiles it into a dependency-free Rust crate with hand-tuned **AVX2 + FMA** kernels, fused RGB-to-uint8/float stem, and a **zero-allocation `NanoSpinPool`**.
+Nano uses a `MobileNetV4-Conv-Small-0.50` backbone distilled from `SigLIP2 Base` with symmetric per-channel `W8` weights and a Matryoshka `256D` / `128D` / `64D` head. The dependency-free Rust runtime uses hand-tuned **AVX2 + FMA** kernels, a fused RGB stem, and a **zero-allocation `NanoSpinPool`**.
 
 Visers Nano's approach to embedding model weights at compile time was inspired by [`flowercomputers/encoders`](https://github.com/flowercomputers/encoders).
 
@@ -19,7 +20,7 @@ Add `visers-nano` to your `Cargo.toml` (weights are compiled directly into the b
 
 ```toml
 [dependencies]
-visers-nano = { git = "https://github.com/0himera/visers-nano" }
+visers-nano = { git = "https://github.com/0himera/visers" }
 ```
 
 Encode a `128×128×3` interleaved `RGB` (`u8`) image into an L2-normalized embedding:
@@ -125,7 +126,7 @@ fn main() -> Result<(), &'static str> {
 
 ```toml
 # Example: 64D embeddings (397 KiB weights, 0.441 ms P50)
-visers-nano = { git = "https://github.com/0himera/visers-nano", default-features = false, features = ["dim-64", "simd"] }
+visers-nano = { git = "https://github.com/0himera/visers", default-features = false, features = ["dim-64", "simd"] }
 ```
 
 ## CLI & Benchmarks
