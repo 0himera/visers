@@ -1,0 +1,19 @@
+[package]
+name = "visers-nano"
+version = "0.1.0"
+edition = "2021"
+description = "Sub-millisecond zero-allocation CPU visual embedding engine with compile-time baked W8 Matryoshka weights"
+license = "Apache-2.0"
+
+[features]
+default = ["dim-256", "simd"]
+dim-64 = []
+dim-128 = []
+dim-256 = []
+simd = []
+
+[dependencies]
+
+[[example]]
+name = "nano_rgb"
+path = "examples/nano_rgb.rs"
