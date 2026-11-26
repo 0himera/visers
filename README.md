@@ -127,7 +127,7 @@ fn main() -> Result<(), &'static str> {
 | `dim-64` | `64` | `406,876 B` (`397 KiB`) | `8.94e-7` |
 
 ```toml
-# Example: 64D embeddings (397 KiB weights, 0.441 ms P50)
+# Example: 64D embeddings (397 KiB baked weights)
 visers = { package = "visers-nano", git = "https://github.com/0himera/visers", default-features = false, features = ["dim-64", "simd"] }
 ```
 

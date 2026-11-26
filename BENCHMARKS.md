@@ -45,7 +45,7 @@ All CPU timings were measured on **Intel Core i7-8700K @ 3.70 GHz** (Coffee Lake
 
 ## 2. CPU Latency, Throughput & Memory
 
-The runtime comparison uses the same 128 `128×128` RGB images from `visers/artifacts/abstract-v2/runtime/validation.rgb` (SHA-256 `ff37815083df93039770d149fd36e91e2b2f7cb9228393edf6b985cd5e934514`). Single-thread runs use `taskset -c 4`. Six-core runs use `taskset -c 0-5`, which selects six distinct physical cores on this CPU. Timings cover preprocessing and inference from in-memory RGB frames. Throughput uses the number of images divided by elapsed time. Reported figures are medians of three warmed runs. Retrieval scores and timing use separate splits.
+The runtime comparison uses the same 128 `128×128` RGB images (`validation.rgb` from the upstream training workspace, SHA-256 `ff37815083df93039770d149fd36e91e2b2f7cb9228393edf6b985cd5e934514`). Single-thread runs use `taskset -c 4`. Six-core runs use `taskset -c 0-5`, which selects six distinct physical cores on this CPU. Timings cover preprocessing and inference from in-memory RGB frames. Throughput uses the number of images divided by elapsed time. Reported figures are medians of three warmed runs. Retrieval scores and timing use separate splits.
 
 ### Visers Nano (release, AVX2/FMA)
 
