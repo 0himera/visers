@@ -1,8 +1,8 @@
-[Visers banner featuring a prism and a stream of images](assets/banner.webp)
+![Visers banner featuring a prism and a stream of images](assets/banner.webp)
 
 # Visers
 
-!**Visers** is a pure Rust CPU inference engine for fast visual embeddings.
+**Visers** is a pure Rust CPU inference engine for fast visual embeddings.
 
 The included **Nano** model encodes `128×128` RGB images into L2-normalized vectors.
 
