@@ -6,6 +6,8 @@
 
 The included **Nano** model encodes `128×128` RGB images into L2-normalized vectors.
 
+[![Visers Nano on Hugging Face](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-md.svg)](https://huggingface.co/0himera/visers-nano)
+
 `0.431 ms` P50 per `128×128` RGB image · `13,224 img/s` on 6 cores · `0` heap allocations · `489 KiB` weights embedded in `.rodata`.
 
 Nano uses a `MobileNetV4-Conv-Small-0.50` backbone distilled from `SigLIP2 Base` with symmetric per-channel `W8` weights and a Matryoshka `256D` / `128D` / `64D` head. The dependency-free Rust runtime uses hand-tuned **AVX2 + FMA** kernels, a fused RGB stem, and a **zero-allocation `NanoSpinPool`**.
