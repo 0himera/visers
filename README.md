@@ -149,6 +149,10 @@ cargo run --release --example nano_rgb -- corpus.rgb embeddings.f32
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the `VSN1` weight format, SIMD kernels, and batch execution.
 
+## Releases
+
+GitHub Actions tests pull requests, pushes to `main`, and version tags. Push a tag `v<version>` matching the version in `Cargo.toml` to publish a [GitHub release](https://github.com/0himera/visers/releases) after the tests pass. Each release includes a Linux x86-64 `nano_rgb` archive and GitHub's source archives.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
