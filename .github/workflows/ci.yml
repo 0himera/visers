@@ -67,15 +67,23 @@ jobs:
           tar -czf "$archive" -C "$package" nano_rgb LICENSE
           echo "RELEASE_ARCHIVE=$archive" >> "$GITHUB_ENV"
 
-      - name: Create the release or attach the missing archive
+      - name: Publish the release with the CLI and benchmark charts
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if assets=$(gh release view "$TAG" --json assets --jq '.assets[].name'); then
-            if ! grep -Fxq "$(basename "$RELEASE_ARCHIVE")" <<< "$assets"; then
-              gh release upload "$TAG" "$RELEASE_ARCHIVE"
-            fi
+          files=(
+            "$RELEASE_ARCHIVE"
+            assets/pareto-speed-quality.png
+            assets/domain-comparison.png
+            assets/nano-throughput-profile.png
+          )
+          if published_assets=$(gh release view "$TAG" --json assets --jq '.assets[].name'); then
+            for file in "${files[@]}"; do
+              if ! grep -Fxq "$(basename "$file")" <<< "$published_assets"; then
+                gh release upload "$TAG" "$file"
+              fi
+            done
           else
-            gh release create "$TAG" "$RELEASE_ARCHIVE" --verify-tag --generate-notes --title "Visers Nano $TAG"
+            gh release create "$TAG" "${files[@]}" --verify-tag --notes-from-tag --title "Visers $TAG"
           fi

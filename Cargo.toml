@@ -1,6 +1,6 @@
 [package]
 name = "visers-nano"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "Sub-millisecond zero-allocation CPU visual embedding engine with compile-time baked W8 Matryoshka weights"
 license = "Apache-2.0"

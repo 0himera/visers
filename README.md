@@ -153,7 +153,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the `VSN1` weight format, SIMD kernel
 
 ## Releases
 
-GitHub Actions tests pull requests, pushes to `main`, and version tags. Push a tag `v<version>` matching the version in `Cargo.toml` to publish a [GitHub release](https://github.com/0himera/visers/releases) after the tests pass. Each release includes a Linux x86-64 `nano_rgb` archive and GitHub's source archives.
+GitHub Actions tests pull requests, pushes to `main`, and version tags. Push a tag `v<version>` matching the version in `Cargo.toml` to publish a [GitHub release](https://github.com/0himera/visers/releases) after the tests pass. An annotated tag supplies the release description. Each release includes a Linux x86-64 `nano_rgb` archive, the benchmark charts, and GitHub's source archives.
 
 ## License
 
