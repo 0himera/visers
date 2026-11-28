@@ -17,15 +17,20 @@ jobs:
   test:
     name: Test Rust and CLI
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - name: Fetch locked dependencies
+        run: cargo +stable fetch --locked
+
       - name: Run release tests
         run: |
           cargo +stable test --release --offline --all-targets
+          cargo +stable test --release --offline --all-targets --features image-files
+          cargo +stable test --release --offline --doc --features image-files
           cargo +stable test --release --offline --all-targets --no-default-features --features dim-128,simd
           cargo +stable test --release --offline --all-targets --no-default-features --features dim-64
 
@@ -34,6 +39,15 @@ jobs:
           dd if=/dev/zero of="$RUNNER_TEMP/frame.rgb" bs=49152 count=1 status=none
           cargo +stable run --release --offline --example nano_rgb -- "$RUNNER_TEMP/frame.rgb" "$RUNNER_TEMP/embedding.f32"
           test "$(wc -c < "$RUNNER_TEMP/embedding.f32")" -eq 1024
+
+      - name: Verify the installed Python wheel against the Rust CLI
+        run: |
+          cargo +stable build --release --locked --offline --features image-files --bin nano_image
+          python3 -m venv "$RUNNER_TEMP/python-api"
+          py="$RUNNER_TEMP/python-api/bin/python"
+          "$py" -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/wheels"
+          "$py" -m pip install "$RUNNER_TEMP"/wheels/visers_nano-*.whl
+          VISERS_NANO_CLI="$PWD/target/release/nano_image" "$py" -m unittest discover -s bindings/python/tests -v
 
   release:
     name: Publish GitHub release
@@ -50,9 +64,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Fetch locked dependencies
+        run: cargo +stable fetch --locked
+
       - name: Package the Linux x86-64 CLI
         run: |
-          version=$(cargo +stable metadata --offline --no-deps --format-version 1 | jq -r '.packages[0].version')
+          version=$(cargo +stable metadata --offline --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "visers-nano") | .version')
           if [[ "$TAG" != "v$version" ]]; then
             echo "Tag $TAG must match Cargo version v$version" >&2
             exit 1

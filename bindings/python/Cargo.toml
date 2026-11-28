@@ -1,0 +1,24 @@
+[package]
+name = "visers-nano-python"
+version.workspace = true
+edition = "2021"
+license = "Apache-2.0"
+repository.workspace = true
+description = "Python bindings for the Visers Nano CPU image encoder"
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[features]
+default = ["simd"]
+simd = ["visers-core/simd"]
+dim-64 = ["visers-core/dim-64"]
+dim-128 = ["visers-core/dim-128"]
+dim-256 = ["visers-core/dim-256"]
+
+[dependencies]
+visers-core = { package = "visers-nano", path = "../..", default-features = false, features = ["image-files"] }
+numpy = "0.30"
+pyo3 = { version = "0.30", features = ["abi3-py310"] }

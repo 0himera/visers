@@ -1,5 +1,4 @@
 target/
-Cargo.lock
 *.f32
 *.rgb
 *.pt

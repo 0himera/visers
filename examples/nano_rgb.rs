@@ -44,7 +44,9 @@ static ALLOCATOR: CountedAllocator = CountedAllocator;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     if args.len() < 3 || args.len() > 4 {
-        return Err("usage: nano_rgb <corpus.rgb> <output.f32|--bench|--profile|--bench-batch N>".into());
+        return Err(
+            "usage: nano_rgb <corpus.rgb> <output.f32|--bench|--profile|--bench-batch N>".into(),
+        );
     }
 
     let model = Arc::new(NanoEncoder::baked()?);
@@ -139,7 +141,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             pool.encode_batch(&images, &mut ws, &mut batch_out)?;
             black_box(&batch_out);
         }
-        assert_eq!(batch_out, seq_out, "NanoSpinPool output must be bit-identical to single-thread");
+        assert_eq!(
+            batch_out, seq_out,
+            "NanoSpinPool output must be bit-identical to single-thread"
+        );
 
         let rounds = 20usize;
         let mut round_ms = Vec::with_capacity(rounds);

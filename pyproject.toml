@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.12,<2"]
+build-backend = "maturin"
+
+[project]
+name = "visers-nano"
+dynamic = ["version"]
+description = "Native CPU visual embeddings for image files and encoded bytes"
+readme = "bindings/python/README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.23.5"]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+
+[project.urls]
+Source = "https://github.com/0himera/visers"
+
+[tool.maturin]
+manifest-path = "bindings/python/Cargo.toml"
+python-source = "bindings/python"
+module-name = "visers_nano._native"

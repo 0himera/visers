@@ -25,7 +25,10 @@ fn main() {
 
     let selected = if let Ok(explicit) = env::var("VISERS_NANO_WEIGHTS") {
         let p = PathBuf::from(&explicit);
-        assert!(p.is_file(), "Explicit VISERS_NANO_WEIGHTS does not exist: {explicit}");
+        assert!(
+            p.is_file(),
+            "Explicit VISERS_NANO_WEIGHTS does not exist: {explicit}"
+        );
         println!("cargo:rerun-if-changed={}", p.display());
         Some(p)
     } else if default_weights.is_file() {
@@ -58,7 +61,10 @@ fn main() {
     let num_ops = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
     let head_in = u32::from_le_bytes(data[12..16].try_into().unwrap()) as usize;
     let head_out = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
-    assert!(nano_dim <= head_out, "Requested dim {nano_dim} > head_out {head_out}");
+    assert!(
+        nano_dim <= head_out,
+        "Requested dim {nano_dim} > head_out {head_out}"
+    );
 
     let mut off = 44usize;
     for _ in 0..num_ops {
@@ -70,7 +76,11 @@ fn main() {
     }
 
     let expected_head_bytes = head_out * 4 + head_out * 4 + head_out * head_in;
-    assert_eq!(off + expected_head_bytes, data.len(), "VSN1 head length mismatch");
+    assert_eq!(
+        off + expected_head_bytes,
+        data.len(),
+        "VSN1 head length mismatch"
+    );
 
     let mut sliced = Vec::with_capacity(off + nano_dim * 4 + nano_dim * 4 + nano_dim * head_in);
     sliced.extend_from_slice(&data[0..off]);

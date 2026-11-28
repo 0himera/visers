@@ -59,7 +59,9 @@ fn nano_baked_simd_matches_scalar_and_normalized() {
         let mut out_simd = vec![0.0f32; NANO_EMBEDDING_DIM];
         let mut out_scalar = vec![0.0f32; NANO_EMBEDDING_DIM];
         model.encode_rgb(&rgb, &mut ws, &mut out_simd).unwrap();
-        model.encode_rgb_scalar(&rgb, &mut ws, &mut out_scalar).unwrap();
+        model
+            .encode_rgb_scalar(&rgb, &mut ws, &mut out_scalar)
+            .unwrap();
 
         let norm: f32 = out_simd.iter().map(|v| v * v).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-5, "expected unit norm, got {norm}");
@@ -71,6 +73,28 @@ fn nano_baked_simd_matches_scalar_and_normalized() {
             .fold(0.0f32, f32::max);
         assert!(max_abs < 2e-5, "SIMD vs scalar drift too high: {max_abs}");
     }
+}
+
+#[test]
+fn nano_custom_rgb_normalization_matches_scalar() {
+    let mut bytes = include_bytes!("../weights/nano_v1.bin").to_vec();
+    let normalization = [0.31f32, 0.42, 0.53, 0.21, 0.32, 0.43];
+    for (slot, value) in bytes[20..44].chunks_exact_mut(4).zip(normalization) {
+        slot.copy_from_slice(&value.to_le_bytes());
+    }
+    let model = NanoEncoder::from_bytes(&bytes).unwrap();
+    let mut workspace = model.workspace();
+    let rgb = pseudo_rgb(27);
+    let mut actual = vec![0.0; model.embedding_dim()];
+    let mut reference = actual.clone();
+    model.encode_rgb(&rgb, &mut workspace, &mut actual).unwrap();
+    model
+        .encode_rgb_scalar(&rgb, &mut workspace, &mut reference)
+        .unwrap();
+    assert!(actual
+        .iter()
+        .zip(reference)
+        .all(|(a, b)| (a - b).abs() < 2e-5));
 }
 
 #[test]
@@ -89,7 +113,11 @@ fn nano_zero_alloc_and_input_validation() {
     model.encode_rgb(&rgb, &mut ws, &mut out).unwrap();
     let conv2 = encode_single_rgb(&rgb).unwrap();
     TRACKING.with(|t| t.set(false));
-    assert_eq!(ALLOCS.with(|c| c.get()), 0, "expected 0 inference allocations");
+    assert_eq!(
+        ALLOCS.with(|c| c.get()),
+        0,
+        "expected 0 inference allocations"
+    );
     assert_eq!(out, conv2);
 
     assert!(model.encode_rgb(&rgb[..100], &mut ws, &mut out).is_err());
@@ -199,7 +227,11 @@ fn nano_spin_pool_bit_exact_and_zero_alloc() {
     TRACKING.with(|t| t.set(true));
     pool.encode_batch(&refs, &mut ws, &mut actual).unwrap();
     TRACKING.with(|t| t.set(false));
-    assert_eq!(ALLOCS.with(|c| c.get()), 0, "expected 0 batch dispatch allocations");
+    assert_eq!(
+        ALLOCS.with(|c| c.get()),
+        0,
+        "expected 0 batch dispatch allocations"
+    );
     assert_eq!(actual, expected);
 }
 
