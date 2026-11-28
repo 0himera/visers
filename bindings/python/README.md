@@ -4,17 +4,24 @@
 
 ## Install
 
-Install the published package in a Python 3.10 or newer environment.
+Add Visers to your Python 3.10+ project with uv.
 
 ```bash
-python -m pip install visers
+uv add visers
 ```
 
-To install from a checkout, run `python -m pip install .` in the repository root. A source build needs Rust 1.88 or newer, a C compiler and CMake. NASM enables SIMD in the bundled JPEG decoder on x86. Pip installs NumPy and uses maturin to build the native extension.
+To install from source, run these commands from the repository root.
+
+```bash
+uv venv
+uv pip install .
+```
+
+A source build needs Rust 1.88 or newer, a C compiler and CMake. NASM enables SIMD in the bundled JPEG decoder on x86. uv installs NumPy and uses maturin to build the native extension.
 
 ## Encode images
 
-This example runs from the repository root. A file and its encoded bytes produce the same row.
+Replace `photo.jpg` with a local image. Its path and encoded bytes produce the same embedding.
 
 ```python
 from pathlib import Path
@@ -22,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import visers as nano
 
-image = Path("assets/banner.webp")
+image = Path("photo.jpg")
 upload = image.read_bytes()
 
 vector = nano.encode_single(image)
@@ -62,9 +69,8 @@ Invalid input types raise `TypeError`. Malformed or unsupported images and inval
 
 ## Build a different embedding width
 
-The default wheel embeds the 256D head. To build a 64D wheel from the repository root, install maturin in your build environment and select the head at compile time. Use `dim-128` for 128D. Each build exports its width through `DIMENSIONS`.
+The default wheel embeds the 256D head. To build a 64D wheel, run maturin from the repository root with `uvx`. Use `dim-128` for 128D. Each build exports its width through `DIMENSIONS`.
 
 ```bash
-python -m pip install "maturin>=1.12,<2"
-maturin build --release --locked --features dim-64 --out dist/64
+uvx --from "maturin>=1.12,<2" maturin build --release --locked --features dim-64 --out dist/64
 ```

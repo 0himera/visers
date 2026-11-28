@@ -20,17 +20,19 @@ Visers approach to embedding model weights at compile time was inspired by [`flo
 
 ### Python
 
-Install Visers from PyPI in a Python 3.10 or newer environment.
+Add Visers to your Python 3.10+ project with uv.
 
 ```bash
-python -m pip install visers
+uv add visers
 ```
+
+Replace `photo.jpg` with the path to an image in your project.
 
 ```python
 from pathlib import Path
 import visers as nano
 
-image = Path("assets/banner.webp")
+image = Path("photo.jpg")
 embedding = nano.encode_single(image)                     # (256,)
 batch = nano.encode([image, image.read_bytes()], jobs=2)  # (2, 256)
 print(nano.similarity(embedding, batch[1]))

@@ -607,7 +607,7 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
 name = "visers-nano"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "fast_image_resize",
  "image",
@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "visers-nano-python"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "numpy",
  "pyo3",
