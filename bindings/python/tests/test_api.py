@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-import visers_nano as nano
+import visers as nano
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -17,6 +17,12 @@ PNG = ROOT / "assets" / "domain-comparison.png"
 
 
 class TestImageAPI(unittest.TestCase):
+    def test_compatibility_import(self):
+        import visers_nano
+
+        for name in nano.__all__:
+            self.assertIs(getattr(visers_nano, name), getattr(nano, name))
+
     def test_shapes_and_mixed_batch_order(self):
         self.assertEqual(nano.dimensions(), nano.DIMENSIONS)
         uploads = [JPEG.read_bytes(), PNG.read_bytes(), WEBP.read_bytes()]

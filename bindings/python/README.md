@@ -1,16 +1,16 @@
 # Visers Nano Python API
 
-`visers_nano` computes L2-normalized visual embeddings on the CPU. It calls the same Rust decoder, resizer and Nano model as the `nano_image` CLI. The wheel contains the model weights and returns NumPy arrays directly.
+`visers` computes L2-normalized visual embeddings on the CPU. It calls the same Rust decoder, resizer and Nano model as the `nano_image` CLI. The wheel contains the model weights and returns NumPy arrays directly. Existing applications can also import the API as `visers_nano`.
 
 ## Install
 
-From the repository root, install into a Python 3.10 or newer environment.
+Install the published package in a Python 3.10 or newer environment.
 
 ```bash
-python -m pip install .
+python -m pip install visers
 ```
 
-A source build needs Rust 1.88 or newer, a C compiler and CMake. NASM enables SIMD in the bundled JPEG decoder on x86. Pip installs NumPy and uses maturin to build the native extension. To build a wheel for another environment on a compatible platform, run `python -m pip wheel --no-deps . -w dist` and install the resulting `.whl` there.
+To install from a checkout, run `python -m pip install .` in the repository root. A source build needs Rust 1.88 or newer, a C compiler and CMake. NASM enables SIMD in the bundled JPEG decoder on x86. Pip installs NumPy and uses maturin to build the native extension.
 
 ## Encode images
 
@@ -20,7 +20,7 @@ This example runs from the repository root. A file and its encoded bytes produce
 from pathlib import Path
 
 import numpy as np
-import visers_nano as nano
+import visers as nano
 
 image = Path("assets/banner.webp")
 upload = image.read_bytes()

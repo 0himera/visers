@@ -20,15 +20,15 @@ Visers approach to embedding model weights at compile time was inspired by [`flo
 
 ### Python
 
-From the repository root, install the package into your Python environment. A source build uses Rust, CMake and a C compiler.
+Install Visers from PyPI in a Python 3.10 or newer environment.
 
 ```bash
-python -m pip install .
+python -m pip install visers
 ```
 
 ```python
 from pathlib import Path
-import visers_nano as nano
+import visers as nano
 
 image = Path("assets/banner.webp")
 embedding = nano.encode_single(image)                     # (256,)
@@ -219,7 +219,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the `VSN1` weight format, SIMD kernel
 
 ## Releases
 
-GitHub Actions tests pull requests, pushes to `main`, and version tags. Push a tag `v<version>` matching the version in `Cargo.toml` to publish a [GitHub release](https://github.com/0himera/visers/releases) after the tests pass. An annotated tag supplies the release description. Each release includes a Linux x86-64 `nano_rgb` archive, the benchmark charts, and GitHub's source archives.
+GitHub Actions tests pull requests and builds Python distributions on pushes to `main` and version tags. An annotated `v<version>` tag matching the workspace version publishes the tested wheels and source distribution to PyPI. The GitHub release includes those files, the Linux x86-64 `nano_rgb` CLI and the benchmark charts. [PyPI](https://pypi.org/project/visers/) · [GitHub releases](https://github.com/0himera/visers/releases)
+
+PyPI Trusted Publishing uses the `pypi` environment in `.github/workflows/ci.yml` from `0himera/visers`.
 
 ## License
 
